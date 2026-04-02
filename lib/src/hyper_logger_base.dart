@@ -6,6 +6,7 @@ import 'package:meta/meta.dart';
 import 'delegates/analytics_delegate.dart';
 import 'delegates/crash_reporting_delegate.dart';
 import 'hyper_logger_wrapper.dart';
+import 'lru_cache.dart';
 import 'model/log_message.dart';
 import 'model/logger_options.dart';
 import 'printer/log_printer.dart';
@@ -46,11 +47,16 @@ class HyperLogger {
   static CrashReportingDelegate? _crashReporting;
   static AnalyticsDelegate? _analytics;
 
+  /// Default maximum number of entries in each LRU cache.
+  static const int defaultMaxCacheSize = 256;
+
   /// Cache of [logging.Logger] instances keyed by type name.
-  static final Map<String, logging.Logger> _loggerCache = {};
+  static LruCache<String, logging.Logger> _loggerCache =
+      LruCache(defaultMaxCacheSize);
 
   /// Cache of [HyperLoggerWrapper] instances keyed by type name + options.
-  static final Map<String, HyperLoggerWrapper> _wrapperCache = {};
+  static LruCache<String, HyperLoggerWrapper> _wrapperCache =
+      LruCache(defaultMaxCacheSize);
 
   /// Subscription to the root logger's record stream.
   static StreamSubscription<logging.LogRecord>? _subscription;
@@ -69,15 +75,23 @@ class HyperLogger {
   /// - [silent] suppresses all printer output. Useful for tests or production.
   /// - [logFilter] is applied to every record before printing. The
   ///   [defaultLogFilter] is a good starting point.
+  /// - [maxCacheSize] controls the maximum number of entries in the internal
+  ///   logger and wrapper LRU caches. Defaults to [defaultMaxCacheSize] (256).
   static void init({
     LogPrinter? printer,
     bool silent = false,
     LogFilter? logFilter,
+    int maxCacheSize = defaultMaxCacheSize,
   }) {
     _silent = silent;
     _printer =
         printer ?? (_initialized ? _printer : null) ?? createDefaultPrinter();
     _logFilter = logFilter;
+
+    if (_loggerCache.maxSize != maxCacheSize) {
+      _loggerCache = LruCache(maxCacheSize);
+      _wrapperCache = LruCache(maxCacheSize);
+    }
 
     if (!_initialized) {
       _initialized = true;
