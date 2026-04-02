@@ -51,12 +51,14 @@ class HyperLogger {
   static const int defaultMaxCacheSize = 256;
 
   /// Cache of [logging.Logger] instances keyed by type name.
-  static LruCache<String, logging.Logger> _loggerCache =
-      LruCache(defaultMaxCacheSize);
+  static LruCache<String, logging.Logger> _loggerCache = LruCache(
+    defaultMaxCacheSize,
+  );
 
   /// Cache of [HyperLoggerWrapper] instances keyed by type name + options.
-  static LruCache<String, HyperLoggerWrapper> _wrapperCache =
-      LruCache(defaultMaxCacheSize);
+  static LruCache<String, HyperLoggerWrapper> _wrapperCache = LruCache(
+    defaultMaxCacheSize,
+  );
 
   /// Subscription to the root logger's record stream.
   static StreamSubscription<logging.LogRecord>? _subscription;
@@ -162,29 +164,61 @@ class HyperLogger {
 
   // ── convenience log methods ────────────────────────────────────────────────
 
-  /// Logs at [logging.Level.FINEST]. Useful for very fine-grained diagnostics.
+  /// Logs at [logging.Level.FINEST] — the most verbose level.
+  ///
+  /// Use for very fine-grained diagnostics you'd only enable when actively
+  /// investigating a specific code path. Unlike [debug], trace output is
+  /// typically too noisy for day-to-day development.
+  ///
+  /// ```dart
+  /// HyperLogger.trace<JsonParser>('Token buffer state', data: buffer);
+  /// ```
   static void trace<T>(String message, {Object? data, String? method}) {
     _ensureInitialized();
     if (_silent) return;
     _log<T>(logging.Level.FINEST, message, data: data, method: method);
   }
 
-  /// Logs at [logging.Level.FINE]. The standard debug-level.
+  /// Logs at [logging.Level.FINE] — the standard debug level.
+  ///
+  /// Use for information that is helpful during development but should not
+  /// appear in production. Good for tracking control flow, intermediate
+  /// values, and "I got here" markers.
+  ///
+  /// ```dart
+  /// HyperLogger.debug<AuthService>('Token refreshed', data: claims);
+  /// ```
   static void debug<T>(String message, {Object? data, String? method}) {
     _ensureInitialized();
     if (_silent) return;
     _log<T>(logging.Level.FINE, message, data: data, method: method);
   }
 
-  /// Logs at [logging.Level.INFO].
+  /// Logs at [logging.Level.INFO] — notable runtime events.
+  ///
+  /// Use for milestones that operators or developers would want to see in
+  /// normal operation: service started, user signed in, sync completed.
+  /// This is the default "interesting things happened" level.
+  ///
+  /// ```dart
+  /// HyperLogger.info<SyncEngine>('Pull completed', data: {'rows': count});
+  /// ```
   static void info<T>(String message, {Object? data, String? method}) {
     _ensureInitialized();
     if (_silent) return;
     _log<T>(logging.Level.INFO, message, data: data, method: method);
   }
 
-  /// Logs at [logging.Level.WARNING]. Also forwards the message to
-  /// [CrashReportingDelegate.log] when attached.
+  /// Logs at [logging.Level.WARNING] — something unexpected that the app
+  /// can recover from.
+  ///
+  /// Use when the system hit a degraded path but continued operating:
+  /// missing optional config, retryable network failure, deprecated API
+  /// usage. Forwards to [CrashReportingDelegate.log] when attached.
+  ///
+  /// ```dart
+  /// HyperLogger.warning<CacheManager>('Stale entry evicted', data: key);
+  /// ```
   static void warning<T>(String message, {Object? data, String? method}) {
     _ensureInitialized();
     // Delegates fire regardless of silent mode.
@@ -193,8 +227,22 @@ class HyperLogger {
     _log<T>(logging.Level.WARNING, message, data: data, method: method);
   }
 
-  /// Logs at [logging.Level.SEVERE]. Also forwards to
-  /// [CrashReportingDelegate.recordError] unless [skipCrashReporting].
+  /// Logs at [logging.Level.SEVERE] — a failure the user or operator
+  /// should know about.
+  ///
+  /// Use when an operation failed and could not complete: unhandled
+  /// exception, failed HTTP request that exhausted retries, corrupt data.
+  /// Forwards to [CrashReportingDelegate.recordError] unless
+  /// [skipCrashReporting] is set.
+  ///
+  /// ```dart
+  /// HyperLogger.error<PaymentService>(
+  ///   'Charge failed',
+  ///   exception: e,
+  ///   stackTrace: st,
+  ///   data: {'orderId': order.id},
+  /// );
+  /// ```
   static void error<T>(
     String message, {
     Object? exception,
@@ -221,8 +269,21 @@ class HyperLogger {
     );
   }
 
-  /// Logs at [logging.Level.SHOUT]. Also forwards to
+  /// Logs at [logging.Level.SHOUT] — an unrecoverable failure that
+  /// requires immediate attention.
+  ///
+  /// Use when the app is about to crash or enter an unusable state:
+  /// null-safety violation in a critical path, database corruption,
+  /// missing required platform capability. Always forwards to
   /// [CrashReportingDelegate.recordError] with `fatal: true`.
+  ///
+  /// ```dart
+  /// HyperLogger.fatal<AppBootstrap>(
+  ///   'Required migration failed — data unreadable',
+  ///   exception: e,
+  ///   stackTrace: st,
+  /// );
+  /// ```
   static void fatal<T>(
     String message, {
     Object? exception,
@@ -251,8 +312,18 @@ class HyperLogger {
     );
   }
 
-  /// Logs the elapsed time of [stopwatch] at [logging.Level.FINE] and
+  /// Logs the elapsed time of [stopwatch] at [logging.Level.INFO] and
   /// forwards the duration to [AnalyticsDelegate.logPerformance].
+  ///
+  /// Use to instrument performance-sensitive operations. The elapsed
+  /// duration is included in the log message and sent to analytics.
+  ///
+  /// ```dart
+  /// final sw = Stopwatch()..start();
+  /// await db.query(sql);
+  /// sw.stop();
+  /// HyperLogger.stopwatch<Database>('Heavy query', sw);
+  /// ```
   static void stopwatch<T>(
     String message,
     Stopwatch stopwatch, {

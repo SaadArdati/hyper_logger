@@ -29,14 +29,12 @@ export 'src/rendering/section_renderer.dart';
 export 'src/rendering/log_renderer.dart';
 
 // Printers
-export 'src/platform/ansi_detection.dart';
 export 'src/platform/environment_detector.dart';
 export 'src/printer/log_printer.dart';
 export 'src/printer/composable_printer.dart';
 export 'src/printer/presets.dart';
 export 'src/printer/direct_printer.dart';
 export 'src/printer/json_printer.dart';
-export 'src/printer/printer_factory.dart';
 
 // Core API
 export 'src/hyper_logger_base.dart';
