@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:logging/logging.dart' as logging;
-import 'package:meta/meta.dart';
 
 import 'delegates/analytics_delegate.dart';
 import 'delegates/crash_reporting_delegate.dart';
@@ -117,7 +116,6 @@ class HyperLogger {
   }
 
   /// Detaches all service delegates. Intended for test teardown.
-  @visibleForTesting
   static void detachServices() {
     _crashReporting = null;
     _analytics = null;
@@ -125,7 +123,6 @@ class HyperLogger {
 
   /// Resets all static state. Intended for test teardown so that each test
   /// starts with a clean slate.
-  @visibleForTesting
   static void reset() {
     _initialized = false;
     _silent = false;
