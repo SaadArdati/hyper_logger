@@ -12,13 +12,13 @@ import 'log_printer.dart';
 ///
 /// Each preset returns a ready-to-use [LogPrinter] for a specific environment:
 ///
-/// | Preset      | Type               | Decorators / Config                 | Best for              |
-/// |-------------|--------------------|--------------------------------------|-----------------------|
-/// | [automatic] | (varies)           | best-effort detection of environment | default / unknown     |
-/// | [terminal]  | [ComposablePrinter]| emoji + box + color + prefix        | local dev terminal    |
-/// | [ci]        | [ComposablePrinter]| timestamp + prefix                  | CI/CD log streams     |
-/// | [ide]       | [ComposablePrinter]| emoji + prefix                      | IDE run console       |
-/// | [cloudRun]  | [JsonPrinter]      | structured JSON per line            | Google Cloud Run      |
+/// | Preset      | Type                | Decorators / Config                  | Best for            |
+/// |-------------|---------------------|--------------------------------------|---------------------|
+/// | [automatic] | (varies)            | best-effort detection of environment | default / unknown   |
+/// | [terminal]  | [ComposablePrinter] | emoji + box + color + prefix         | local dev terminal  |
+/// | [ci]        | [ComposablePrinter] | timestamp + prefix                   | CI/CD log streams   |
+/// | [ide]       | [ComposablePrinter] | emoji + prefix                       | IDE run console     |
+/// | [cloudRun]  | [JsonPrinter]       | structured JSON per line             | Google Cloud Run    |
 extension LogPrinterPresets on LogPrinter {
   /// Detects the current [RuntimeEnvironment] and returns the best printer.
   ///
@@ -27,14 +27,14 @@ extension LogPrinterPresets on LogPrinter {
   ///
   /// This is the default when [HyperLogger.init] is called without an
   /// explicit printer on native platforms.
-  static LogPrinter automatic({void Function(String)? output}) {
+  static LogPrinter automatic({LogOutput? output}) {
     final env = const EnvironmentDetector().detect();
     return switch (env) {
-      RuntimeEnvironment.cloudRun => cloudRun(output: output),
-      RuntimeEnvironment.ci => ci(output: output),
-      RuntimeEnvironment.ide => ide(output: output),
-      RuntimeEnvironment.terminal => terminal(output: output),
-      RuntimeEnvironment.plain => _plain(output: output),
+      .cloudRun => cloudRun(output: output),
+      .ci => ci(output: output),
+      .ide => ide(output: output),
+      .terminal => terminal(output: output),
+      .plain => _plain(output: output),
     };
   }
 
@@ -42,7 +42,7 @@ extension LogPrinterPresets on LogPrinter {
   ///
   /// Applies: [EmojiDecorator] · [BoxDecorator] · [AnsiColorDecorator] ·
   /// [PrefixDecorator].
-  static ComposablePrinter terminal({void Function(String)? output}) =>
+  static ComposablePrinter terminal({LogOutput? output}) =>
       ComposablePrinter(const [
         EmojiDecorator(),
         BoxDecorator(),
@@ -55,37 +55,33 @@ extension LogPrinterPresets on LogPrinter {
   /// Applies: [TimestampDecorator] · [PrefixDecorator].
   /// No colour or box so that log lines are parseable as plain text.
   /// Output format: `<ISO-8601> [LEVEL] [Class.method] Message`
-  static ComposablePrinter ci({void Function(String)? output}) =>
-      ComposablePrinter(const [
-        TimestampDecorator(),
-        PrefixDecorator(),
-      ], output: output ?? print);
+  static ComposablePrinter ci({LogOutput? output}) => ComposablePrinter(const [
+    TimestampDecorator(),
+    PrefixDecorator(),
+  ], output: output ?? print);
 
   /// Creates a [ComposablePrinter] suited for IDE run-console output.
   ///
   /// Applies: [EmojiDecorator] · [PrefixDecorator].
   /// Emoji gives quick visual scanning without box-drawing clutter.
-  static ComposablePrinter ide({void Function(String)? output}) =>
-      ComposablePrinter(const [
-        EmojiDecorator(),
-        PrefixDecorator(),
-      ], output: output ?? print);
+  static ComposablePrinter ide({LogOutput? output}) => ComposablePrinter(const [
+    EmojiDecorator(),
+    PrefixDecorator(),
+  ], output: output ?? print);
 
   /// Returns a [JsonPrinter] for Google Cloud Run structured logging.
   ///
   /// Each log entry is emitted as a single JSON object per line, compatible
   /// with Google Cloud Logging's structured log format.
-  static JsonPrinter cloudRun({void Function(String)? output}) =>
+  static JsonPrinter cloudRun({LogOutput? output}) =>
       JsonPrinter(output: output ?? print);
 
   /// Minimal preset for environments without ANSI support.
   ///
   /// Applies: [TimestampDecorator] · [EmojiDecorator] · [PrefixDecorator].
   /// Timestamps for traceability, emoji for quick scanning, no color or box.
-  static ComposablePrinter _plain({void Function(String)? output}) =>
-      ComposablePrinter(const [
-        TimestampDecorator(),
-        EmojiDecorator(),
-        PrefixDecorator(),
-      ], output: output ?? print);
+  static ComposablePrinter _plain({LogOutput? output}) => ComposablePrinter(
+    const [TimestampDecorator(), EmojiDecorator(), PrefixDecorator()],
+    output: output ?? print,
+  );
 }

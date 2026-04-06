@@ -1,5 +1,4 @@
-import 'package:logging/logging.dart' as logging;
-
+import '../model/log_entry.dart';
 import 'log_printer.dart';
 
 /// The simplest possible [LogPrinter]: prints each record's message text
@@ -10,12 +9,12 @@ import 'log_printer.dart';
 /// can be replaced in tests.
 class DirectPrinter implements LogPrinter {
   /// Sink for formatted output. Defaults to [print].
-  final void Function(String) output;
+  final LogOutput output;
 
   const DirectPrinter({this.output = print});
 
   @override
-  void log(logging.LogRecord record) {
-    output(record.message);
+  void log(LogEntry entry) {
+    output(entry.message);
   }
 }

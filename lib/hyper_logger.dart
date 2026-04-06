@@ -7,7 +7,6 @@ export 'src/model/logger_options.dart';
 export 'src/model/resolved_style.dart';
 
 // Delegates
-export 'src/delegates/analytics_delegate.dart';
 export 'src/delegates/crash_reporting_delegate.dart';
 
 // Decorators
@@ -35,11 +34,13 @@ export 'src/printer/composable_printer.dart';
 export 'src/printer/presets.dart';
 export 'src/printer/direct_printer.dart';
 export 'src/printer/json_printer.dart';
+export 'src/printer/throttled_printer.dart';
 
 // Core API
 export 'src/hyper_logger_base.dart';
 export 'src/hyper_logger_mixin.dart';
-export 'src/hyper_logger_wrapper.dart';
+export 'src/scoped_logger.dart';
 
-// Re-export Level for convenience
-export 'package:logging/logging.dart' show Level;
+export 'src/model/log_entry.dart';
+export 'src/model/log_level.dart';
+export 'src/model/log_mode.dart';

@@ -8,7 +8,7 @@
 - `JsonPrinter` for structured JSON logging (Google Cloud Logging compatible).
 - `WebConsolePrinter` for browser DevTools output.
 - `HyperLoggerMixin` for instance-method logging with automatic type resolution.
-- `HyperLoggerWrapper` with `LoggerOptions` for per-module configuration.
+- `ScopedLogger` with `LoggerOptions` for per-module configuration.
 - Crash reporting and analytics delegate support.
-- Silent mode for tests.
+- `LogMode` enum (`enabled`, `silent`, `disabled`) at both global and per-scope levels.
 - Auto-initialization with platform defaults.

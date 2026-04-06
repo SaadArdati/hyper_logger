@@ -1,5 +1,4 @@
 import 'package:hyper_logger/hyper_logger.dart';
-import 'package:logging/logging.dart' as logging;
 import 'package:test/test.dart';
 
 // ── Test doubles ───────────────────────────────────────────────────────────────
@@ -15,7 +14,7 @@ class _CapturingResolver extends StyleResolver {
   _CapturingResolver({this.withBox = false});
 
   @override
-  ResolvedBorderStyle resolveBorder(LogStyle style, logging.Level level) {
+  ResolvedBorderStyle resolveBorder(LogStyle style, LogLevel level) {
     if (!withBox) return const ResolvedBorderStyle.none();
     return const ResolvedBorderStyle(
       topBorder: '┌top┐',
@@ -28,7 +27,7 @@ class _CapturingResolver extends StyleResolver {
   ResolvedSectionStyle resolve({
     required LogStyle style,
     required SectionKind kind,
-    required logging.Level level,
+    required LogLevel level,
     String? className,
     String? methodName,
   }) {
@@ -50,7 +49,7 @@ ExtractionResult _extraction({
   List<LogSection> sections = const [],
   String? className,
   String? methodName,
-  logging.Level level = logging.Level.INFO,
+  LogLevel level = LogLevel.info,
   DateTime? time,
 }) => ExtractionResult(
   sections: sections,
@@ -296,6 +295,95 @@ void main() {
       final result = _renderer.render(extraction, style, resolver);
 
       expect(result, ['┌top┐', '└bot┘']);
+    });
+  });
+
+  // ── Timestamp rendering ──────────────────────────────────────────────────
+
+  group('Timestamp rendering', () {
+    test('boxed timestamp appears as its own section before message', () {
+      final resolver = _CapturingResolver(withBox: true);
+      final style = LogStyle()
+        ..box = true
+        ..timestamp = true;
+      final extraction = _extraction(
+        sections: [
+          const LogSection(SectionKind.message, ['hello']),
+        ],
+        time: DateTime(2026, 4, 1, 12, 0, 0),
+      );
+
+      final result = _renderer.render(extraction, style, resolver);
+
+      // Layout: top, timestamp line, divider, message, bottom
+      expect(result.first, startsWith('┌'));
+      expect(result.last, startsWith('└'));
+      // The timestamp section should be between the top border and the divider.
+      // result[1] is the timestamp line, result[2] is the divider.
+      expect(result[1], contains('[INFO]'));
+      expect(result[2], startsWith('├'));
+      expect(result[3], 'hello');
+    });
+
+    test('inline timestamp is prepended to the first line when box=false', () {
+      final resolver = _CapturingResolver(withBox: false);
+      final style = LogStyle()
+        ..box = false
+        ..timestamp = true;
+      final extraction = _extraction(
+        sections: [
+          const LogSection(SectionKind.message, ['hello']),
+        ],
+        time: DateTime(2026, 4, 1, 12, 0, 0),
+      );
+
+      final result = _renderer.render(extraction, style, resolver);
+
+      // The first (and only) line should start with the timestamp.
+      expect(result, hasLength(1));
+      expect(result[0], contains('[INFO]'));
+      expect(result[0], contains('hello'));
+    });
+
+    test('custom dateTimeFormatter is used in timestamp', () {
+      final resolver = _CapturingResolver(withBox: false);
+      final style = LogStyle()
+        ..box = false
+        ..timestamp = true
+        ..dateTimeFormatter = (dt) => 'CUSTOM_TIME';
+      final extraction = _extraction(
+        sections: [
+          const LogSection(SectionKind.message, ['hello']),
+        ],
+      );
+
+      final result = _renderer.render(extraction, style, resolver);
+
+      expect(result[0], startsWith('CUSTOM_TIME'));
+    });
+
+    test('timestamp contains [LEVEL] label tag', () {
+      final resolver = _CapturingResolver(withBox: false);
+      final style = LogStyle()
+        ..box = false
+        ..timestamp = true;
+
+      for (final level in LogLevel.values) {
+        final extraction = _extraction(
+          sections: [
+            const LogSection(SectionKind.message, ['msg']),
+          ],
+          level: level,
+        );
+
+        final result = _renderer.render(extraction, style, resolver);
+
+        expect(
+          result[0],
+          contains('[${level.label}]'),
+          reason: '$level should produce [${level.label}] in timestamp',
+        );
+      }
     });
   });
 }

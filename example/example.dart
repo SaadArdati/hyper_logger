@@ -1,6 +1,5 @@
 // ignore_for_file: avoid_print
 import 'package:hyper_logger/hyper_logger.dart';
-import 'package:logging/logging.dart' as logging;
 
 /// Run: dart run example/demo.dart
 /// Or from repo root: dart run packages/hyper_logger/example/demo.dart
@@ -62,9 +61,9 @@ void main() {
 
 void _section(String title) {
   print('');
-  print('═' * 80);
+  print('=' * 80);
   print('  $title');
-  print('═' * 80);
+  print('=' * 80);
   print('');
 }
 
@@ -78,17 +77,22 @@ void _demoPrinter(LogPrinter printer) {
 
 void _demo(ComposablePrinter printer) {
   final levels = [
-    (logging.Level.FINE, 'Debug message', 'MyService', 'fetchData'),
-    (logging.Level.INFO, 'User logged in successfully', 'AuthBloc', 'onLogin'),
-    (logging.Level.WARNING, 'Rate limit approaching', 'ApiClient', 'request'),
-    (logging.Level.SEVERE, 'Connection failed', 'WebSocket', 'connect'),
+    (LogLevel.debug, 'Debug message', 'MyService', 'fetchData'),
+    (LogLevel.info, 'User logged in successfully', 'AuthBloc', 'onLogin'),
+    (LogLevel.warning, 'Rate limit approaching', 'ApiClient', 'request'),
+    (LogLevel.error, 'Connection failed', 'WebSocket', 'connect'),
   ];
 
   for (final (level, msg, cls, method) in levels) {
     final logMsg = LogMessage(msg, String, method: method);
-    // Fake the className by putting it in the message prefix
-    final record = logging.LogRecord(level, msg, cls, null, null, null, logMsg);
-    final lines = printer.format(record);
+    final entry = LogEntry(
+      level: level,
+      message: msg,
+      object: logMsg,
+      loggerName: cls,
+      time: DateTime.now(),
+    );
+    final lines = printer.format(entry);
     for (final line in lines) {
       print(line);
     }
@@ -96,7 +100,7 @@ void _demo(ComposablePrinter printer) {
 
   // One with data
   print('');
-  print('  ── with structured data ──');
+  print('  -- with structured data --');
   print('');
   final withData = LogMessage(
     'Fetched portfolio',
@@ -104,49 +108,53 @@ void _demo(ComposablePrinter printer) {
     method: 'load',
     data: {'positions': 12, 'totalValue': 45230.50, 'currency': 'USD'},
   );
-  final dataRecord = logging.LogRecord(
-    logging.Level.INFO,
-    'Fetched portfolio',
-    'Portfolio',
-    null,
-    null,
-    null,
-    withData,
+  final dataEntry = LogEntry(
+    level: LogLevel.info,
+    message: 'Fetched portfolio',
+    object: withData,
+    loggerName: 'Portfolio',
+    time: DateTime.now(),
   );
-  for (final line in printer.format(dataRecord)) {
+  for (final line in printer.format(dataEntry)) {
     print(line);
   }
 
   // One with error + stack trace
   print('');
-  print('  ── with error ──');
+  print('  -- with error --');
   print('');
-  final errorRecord = logging.LogRecord(
-    logging.Level.SEVERE,
-    'Failed to parse response',
-    'ApiClient',
-    FormatException('Unexpected character at position 42'),
-    StackTrace.current,
-    null,
-    LogMessage('Failed to parse response', String, method: 'parseJson'),
+  final errorEntry = LogEntry(
+    level: LogLevel.error,
+    message: 'Failed to parse response',
+    object: LogMessage('Failed to parse response', String, method: 'parseJson'),
+    loggerName: 'ApiClient',
+    time: DateTime.now(),
+    error: FormatException('Unexpected character at position 42'),
+    stackTrace: StackTrace.current,
   );
-  for (final line in printer.format(errorRecord)) {
+  for (final line in printer.format(errorEntry)) {
     print(line);
   }
 }
 
 void _jsonDemo(JsonPrinter printer) {
   final levels = [
-    (logging.Level.FINE, 'Debug message', 'MyService', 'fetchData'),
-    (logging.Level.INFO, 'User logged in successfully', 'AuthBloc', 'onLogin'),
-    (logging.Level.WARNING, 'Rate limit approaching', 'ApiClient', 'request'),
-    (logging.Level.SEVERE, 'Connection failed', 'WebSocket', 'connect'),
+    (LogLevel.debug, 'Debug message', 'MyService', 'fetchData'),
+    (LogLevel.info, 'User logged in successfully', 'AuthBloc', 'onLogin'),
+    (LogLevel.warning, 'Rate limit approaching', 'ApiClient', 'request'),
+    (LogLevel.error, 'Connection failed', 'WebSocket', 'connect'),
   ];
 
   for (final (level, msg, cls, method) in levels) {
     final logMsg = LogMessage(msg, String, method: method);
-    final record = logging.LogRecord(level, msg, cls, null, null, null, logMsg);
-    final lines = printer.format(record);
+    final entry = LogEntry(
+      level: level,
+      message: msg,
+      object: logMsg,
+      loggerName: cls,
+      time: DateTime.now(),
+    );
+    final lines = printer.format(entry);
     for (final line in lines) {
       print(line);
     }

@@ -1,6 +1,5 @@
 // ignore_for_file: avoid_print
 import 'package:hyper_logger/hyper_logger.dart';
-import 'package:logging/logging.dart' as logging;
 
 import 'shared/noop_output.dart';
 import 'shared/scenarios.dart';
@@ -17,11 +16,6 @@ import 'shared/scenarios.dart';
 ///
 /// Run: dart run benchmark/hyper_logger_benchmark.dart
 void main() {
-  // Disable the global logger subscription so benchmarks only measure
-  // the printer pipeline, not the logging package overhead.
-  logging.hierarchicalLoggingEnabled = true;
-  logging.Logger.root.level = logging.Level.OFF;
-
   print('');
   print('hyper_logger benchmark suite');
   print('=' * 70);
@@ -166,24 +160,33 @@ void main() {
 
   _header('4. Disabled / filtered message cost');
 
-  _bench('HyperLoggerWrapper (disabled: true)', () {
-    HyperLogger.init(printer: DirectPrinter(output: noop.call), silent: true);
-    final wrapper = HyperLoggerWrapper<String>(
-      options: const LoggerOptions(disabled: true),
+  _bench('ScopedLogger (mode: disabled)', () {
+    HyperLogger.init(
+      printer: DirectPrinter(output: noop.call),
+      mode: LogMode.silent,
+    );
+    final wrapper = ScopedLogger<String>(
+      options: const LoggerOptions(mode: LogMode.disabled),
     );
     return () => wrapper.info('should be suppressed');
   });
 
-  _bench('HyperLoggerWrapper (minLevel: WARNING, sending INFO)', () {
-    HyperLogger.init(printer: DirectPrinter(output: noop.call), silent: true);
-    final wrapper = HyperLoggerWrapper<String>(
-      options: const LoggerOptions(minLevel: logging.Level.WARNING),
+  _bench('ScopedLogger (minLevel: WARNING, sending INFO)', () {
+    HyperLogger.init(
+      printer: DirectPrinter(output: noop.call),
+      mode: LogMode.silent,
+    );
+    final wrapper = ScopedLogger<String>(
+      options: const LoggerOptions(minLevel: LogLevel.warning),
     );
     return () => wrapper.info('should be filtered');
   });
 
-  _bench('Silent mode (HyperLogger.init silent: true)', () {
-    HyperLogger.init(printer: DirectPrinter(output: noop.call), silent: true);
+  _bench('Silent mode (HyperLogger.init mode: silent)', () {
+    HyperLogger.init(
+      printer: DirectPrinter(output: noop.call),
+      mode: LogMode.silent,
+    );
     return () => HyperLogger.info<String>('suppressed by silent');
   });
 

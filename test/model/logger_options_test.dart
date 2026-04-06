@@ -1,16 +1,14 @@
 import 'package:hyper_logger/hyper_logger.dart';
-import 'package:logging/logging.dart' as logging;
 import 'package:test/test.dart';
 
 void main() {
   group('LoggerOptions', () {
     test('defaults has all default values', () {
       const opts = LoggerOptions.defaults;
-      expect(opts.disabled, isFalse);
+      expect(opts.mode, LogMode.enabled);
       expect(opts.minLevel, isNull);
       expect(opts.tag, isNull);
       expect(opts.skipCrashReporting, isFalse);
-      expect(opts.printer, isNull);
     });
 
     test('const constructor with no args matches defaults', () {
@@ -19,21 +17,21 @@ void main() {
     });
 
     test('equality compares all fields', () {
-      const a = LoggerOptions(disabled: true, tag: 'x');
-      const b = LoggerOptions(disabled: true, tag: 'x');
+      const a = LoggerOptions(mode: LogMode.disabled, tag: 'x');
+      const b = LoggerOptions(mode: LogMode.disabled, tag: 'x');
       expect(a, equals(b));
       expect(a.hashCode, equals(b.hashCode));
     });
 
-    test('different disabled produces inequality', () {
-      const a = LoggerOptions(disabled: true);
-      const b = LoggerOptions(disabled: false);
+    test('different mode produces inequality', () {
+      const a = LoggerOptions(mode: LogMode.disabled);
+      const b = LoggerOptions(mode: LogMode.enabled);
       expect(a, isNot(equals(b)));
     });
 
     test('different minLevel produces inequality', () {
-      const a = LoggerOptions(minLevel: logging.Level.INFO);
-      const b = LoggerOptions(minLevel: logging.Level.WARNING);
+      const a = LoggerOptions(minLevel: LogLevel.info);
+      const b = LoggerOptions(minLevel: LogLevel.warning);
       expect(a, isNot(equals(b)));
     });
 
@@ -49,40 +47,24 @@ void main() {
       expect(a, isNot(equals(b)));
     });
 
-    test('different printer produces inequality', () {
-      final p1 = DirectPrinter();
-      final p2 = DirectPrinter();
-      final a = LoggerOptions(printer: p1);
-      final b = LoggerOptions(printer: p2);
-      // Different instances → not equal.
-      expect(a, isNot(equals(b)));
-    });
-
-    test('same printer instance produces equality', () {
-      final p = DirectPrinter();
-      final a = LoggerOptions(printer: p);
-      final b = LoggerOptions(printer: p);
-      expect(a, equals(b));
-    });
-
     test('cacheKey includes all fields', () {
       const opts = LoggerOptions(
-        disabled: true,
-        minLevel: logging.Level.WARNING,
+        mode: LogMode.disabled,
+        minLevel: LogLevel.warning,
         tag: 'auth',
         skipCrashReporting: true,
       );
       final key = opts.cacheKey('MyType');
       expect(key, contains('MyType'));
-      expect(key, contains('d=true'));
-      expect(key, contains('l=${logging.Level.WARNING.value}'));
+      expect(key, contains('m=disabled'));
+      expect(key, contains('l=warning'));
       expect(key, contains('t=auth'));
       expect(key, contains('s=true'));
     });
 
     test('cacheKey differs for different options', () {
-      const a = LoggerOptions(disabled: true);
-      const b = LoggerOptions(disabled: false);
+      const a = LoggerOptions(mode: LogMode.disabled);
+      const b = LoggerOptions(mode: LogMode.enabled);
       expect(a.cacheKey('T'), isNot(equals(b.cacheKey('T'))));
     });
 

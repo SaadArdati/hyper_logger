@@ -1,8 +1,9 @@
 import 'dart:convert';
 
-import 'package:logging/logging.dart' as logging;
 import 'package:stack_trace/stack_trace.dart';
 
+import '../model/log_entry.dart';
+import '../model/log_level.dart';
 import '../model/log_message.dart';
 import '../model/log_section.dart';
 import 'caller_extractor.dart';
@@ -13,9 +14,9 @@ class ExtractionResult {
   final List<LogSection> sections;
   final String? className;
   final String? methodName;
-  final logging.Level level;
+  final LogLevel level;
 
-  /// The timestamp from the original [logging.LogRecord].
+  /// The timestamp from the original [LogEntry].
   final DateTime time;
 
   const ExtractionResult({
@@ -27,12 +28,15 @@ class ExtractionResult {
   });
 }
 
-/// Performs a single-pass parse of a [logging.LogRecord] into an
+/// Performs a single-pass parse of a [LogEntry] into an
 /// [ExtractionResult] with pre-split [LogSection]s.
 ///
 /// All expensive work (JSON serialisation, stack-trace parsing, caller
 /// extraction) happens here and only here. Everything downstream works
 /// with pre-parsed data.
+/// True in release/production mode where Type.toString() returns minified names.
+const bool _isReleaseMode = bool.fromEnvironment('dart.vm.product');
+
 class ContentExtractor {
   final StackTraceParser stackTraceParser;
   final CallerExtractor callerExtractor;
@@ -42,8 +46,8 @@ class ContentExtractor {
     required this.callerExtractor,
   });
 
-  ExtractionResult extract(logging.LogRecord record) {
-    final object = record.object;
+  ExtractionResult extract(LogEntry entry) {
+    final object = entry.object;
     final sections = <LogSection>[];
     String? className;
     String? methodName;
@@ -61,9 +65,13 @@ class ContentExtractor {
       }
 
       // ── className / methodName ────────────────────────────────────────────
-      final typeName = object.type.toString();
-      if (typeName != 'dynamic' && typeName != 'Object') {
-        className = typeName;
+      // In release mode (dart2js), Type.toString() returns minified names.
+      // Skip type rendering to avoid garbled output.
+      if (!_isReleaseMode) {
+        final typeName = object.type.toString();
+        if (typeName != 'dynamic' && typeName != 'Object') {
+          className = typeName;
+        }
       }
 
       methodName = object.method;
@@ -86,19 +94,17 @@ class ContentExtractor {
       }
     } else {
       // Plain string (or anything with a usable toString)
-      sections.add(
-        LogSection(SectionKind.message, _splitLines(record.message)),
-      );
+      sections.add(LogSection(SectionKind.message, _splitLines(entry.message)));
     }
 
     // ── error section ────────────────────────────────────────────────────────
-    final error = record.error;
+    final error = entry.error;
     if (error != null) {
       sections.add(LogSection(SectionKind.error, [error.toString()]));
     }
 
     // ── stackTrace section ───────────────────────────────────────────────────
-    final stackTrace = record.stackTrace;
+    final stackTrace = entry.stackTrace;
     if (stackTrace != null) {
       // Parse the chain once, share with parser.
       final chain = stackTrace is Chain
@@ -116,8 +122,8 @@ class ContentExtractor {
 
     return ExtractionResult(
       sections: sections,
-      level: record.level,
-      time: record.time,
+      level: entry.level,
+      time: entry.time,
       className: className,
       methodName: methodName,
     );

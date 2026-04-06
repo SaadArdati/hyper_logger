@@ -1,31 +1,30 @@
 import 'package:hyper_logger/hyper_logger.dart';
-import 'package:logging/logging.dart' as logging;
 import 'package:test/test.dart';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Builds a minimal [logging.LogRecord].
-logging.LogRecord _record({
+/// Builds a minimal [LogEntry].
+LogEntry _record({
   String message = 'test message',
   Object? object,
-  logging.Level level = logging.Level.INFO,
+  LogLevel level = LogLevel.info,
   Object? error,
   StackTrace? stackTrace,
 }) {
-  return logging.LogRecord(
-    level,
-    message,
-    'test.logger',
-    error,
-    stackTrace,
-    null,
-    object,
+  return LogEntry(
+    level: level,
+    message: message,
+    object: object,
+    loggerName: 'test.logger',
+    time: DateTime.now(),
+    error: error,
+    stackTrace: stackTrace,
   );
 }
 
 /// Runs [printer.format] and returns the joined lines.
-String _format(ComposablePrinter printer, logging.LogRecord record) {
-  return printer.format(record).join('\n');
+String _format(ComposablePrinter printer, LogEntry entry) {
+  return printer.format(entry).join('\n');
 }
 
 // ── Stub decorator that records apply() calls ─────────────────────────────────

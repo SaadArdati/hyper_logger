@@ -1,6 +1,5 @@
-import 'package:logging/logging.dart';
-
 import 'ansi_color.dart';
+import 'log_level.dart';
 
 /// Formats a [DateTime] to a display string.
 typedef DateTimeFormatter = String Function(DateTime);
@@ -33,12 +32,12 @@ class LogStyle {
   /// default (typically the full trace).
   int? stackTraceMethodCount;
 
-  /// Override emojis per [Level]. When `null`, the resolver uses its defaults.
-  Map<Level, String>? levelEmojis;
+  /// Override emojis per [LogLevel]. When `null`, the resolver uses its defaults.
+  Map<LogLevel, String>? levelEmojis;
 
-  /// Override ANSI colors per [Level]. When `null`, the resolver uses its
+  /// Override ANSI colors per [LogLevel]. When `null`, the resolver uses its
   /// defaults.
-  Map<Level, AnsiColor>? levelColors;
+  Map<LogLevel, AnsiColor>? levelColors;
 
   /// Custom formatter for the timestamp section. When `null`, the resolver
   /// uses its default ISO-8601 representation.

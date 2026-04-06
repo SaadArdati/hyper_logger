@@ -7,6 +7,9 @@ import 'package:stack_trace/stack_trace.dart' as st;
 import 'shared/noop_output.dart';
 import 'shared/scenarios.dart';
 
+// Note: This benchmark still imports 'package:logging/logging.dart' because
+// section 3 benchmarks the raw logging.Logger overhead directly.
+
 /// Deep-dive benchmarks targeting the three hotspots found in the main suite:
 ///
 /// 1. Stack trace parsing (~400us) — where does the time go?
@@ -205,20 +208,18 @@ void main() {
   // provided in our scenario. Let's test with and without.
   _bench('format() simple record WITHOUT LogMessage.method', () {
     final p = ComposablePrinter(const [], output: noop.call);
-    // Build a record whose LogMessage has no method set, forcing
+    // Build an entry whose LogMessage has no method set, forcing
     // CallerExtractor to try extraction from callerStackTrace.
     final msg = LogMessage('hello', String);
-    final record = logging.LogRecord(
-      logging.Level.INFO,
-      'hello',
-      'Test',
-      null,
-      null,
-      null,
-      msg,
+    final entry = LogEntry(
+      level: LogLevel.info,
+      message: 'hello',
+      object: msg,
+      loggerName: 'Test',
+      time: DateTime.now(),
     );
     return () {
-      final lines = p.format(record);
+      final lines = p.format(entry);
       noop.callCount += lines.length;
     };
   });
@@ -228,17 +229,15 @@ void main() {
     () {
       final p = ComposablePrinter(const [], output: noop.call);
       final msg = LogMessage('hello', String, method: 'doWork');
-      final record = logging.LogRecord(
-        logging.Level.INFO,
-        'hello',
-        'Test',
-        null,
-        null,
-        null,
-        msg,
+      final entry = LogEntry(
+        level: LogLevel.info,
+        message: 'hello',
+        object: msg,
+        loggerName: 'Test',
+        time: DateTime.now(),
       );
       return () {
-        final lines = p.format(record);
+        final lines = p.format(entry);
         noop.callCount += lines.length;
       };
     },
@@ -246,9 +245,14 @@ void main() {
 
   _bench('format() plain string record (no LogMessage)', () {
     final p = ComposablePrinter(const [], output: noop.call);
-    final record = logging.LogRecord(logging.Level.INFO, 'hello world', 'Test');
+    final entry = LogEntry(
+      level: LogLevel.info,
+      message: 'hello world',
+      loggerName: 'Test',
+      time: DateTime.now(),
+    );
     return () {
-      final lines = p.format(record);
+      final lines = p.format(entry);
       noop.callCount += lines.length;
     };
   });
@@ -259,16 +263,22 @@ void main() {
 
   _header('3. Silent mode cost breakdown');
 
-  _bench('Wrapper disabled: true (early return)', () {
-    HyperLogger.init(printer: DirectPrinter(output: noop.call), silent: true);
-    final wrapper = HyperLoggerWrapper<String>(
-      options: const LoggerOptions(disabled: true),
+  _bench('ScopedLogger mode: disabled (early return)', () {
+    HyperLogger.init(
+      printer: DirectPrinter(output: noop.call),
+      mode: LogMode.silent,
+    );
+    final wrapper = ScopedLogger<String>(
+      options: const LoggerOptions(mode: LogMode.disabled),
     );
     return () => wrapper.info('suppressed');
   });
 
-  _bench('HyperLogger.info (silent: true)', () {
-    HyperLogger.init(printer: DirectPrinter(output: noop.call), silent: true);
+  _bench('HyperLogger.info (mode: silent)', () {
+    HyperLogger.init(
+      printer: DirectPrinter(output: noop.call),
+      mode: LogMode.silent,
+    );
     return () => HyperLogger.info<String>('suppressed');
   });
 
@@ -276,7 +286,10 @@ void main() {
     // This measures the static dispatch path that silent mode still executes:
     // _ensureInitialized → _log → LogMessage() → _getLogger → logger.log
     // Even though the listener drops it, the LogRecord is allocated.
-    HyperLogger.init(printer: DirectPrinter(output: noop.call), silent: true);
+    HyperLogger.init(
+      printer: DirectPrinter(output: noop.call),
+      mode: LogMode.silent,
+    );
     // Warm the logger cache for type String
     HyperLogger.info<String>('warmup');
     return () => HyperLogger.info<String>('suppressed');

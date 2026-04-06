@@ -15,13 +15,13 @@ LogStyle _boxed({int lineLength = 120}) => LogStyle()
   ..lineLength = lineLength;
 
 /// Returns a [LogStyle] with [emoji] enabled.
-LogStyle _emoji({Map<Level, String>? custom}) => LogStyle()
+LogStyle _emoji({Map<LogLevel, String>? custom}) => LogStyle()
   ..emoji = true
   ..prefix = false
   ..levelEmojis = custom;
 
 /// Returns a [LogStyle] with [ansiColors] enabled.
-LogStyle _colored({Map<Level, AnsiColor>? custom}) => LogStyle()
+LogStyle _colored({Map<LogLevel, AnsiColor>? custom}) => LogStyle()
   ..ansiColors = true
   ..prefix = false
   ..levelColors = custom;
@@ -48,7 +48,7 @@ void main() {
           final style = resolver.resolve(
             style: _plain(),
             kind: kind,
-            level: Level.INFO,
+            level: LogLevel.info,
           );
           expect(
             style.linePrefix,
@@ -86,7 +86,7 @@ void main() {
         final style = resolver.resolve(
           style: _boxed(),
           kind: kind,
-          level: Level.INFO,
+          level: LogLevel.info,
         );
         expect(
           style.linePrefix,
@@ -100,7 +100,7 @@ void main() {
       final style = resolver.resolve(
         style: _plain(),
         kind: SectionKind.message,
-        level: Level.INFO,
+        level: LogLevel.info,
       );
       expect(style.linePrefix, isEmpty);
     });
@@ -111,11 +111,11 @@ void main() {
   // --------------------------------------------------------------------------
 
   group('emoji flag → emojiPrefix on message only', () {
-    test('SectionKind.message gets non-null emojiPrefix for INFO', () {
+    test('SectionKind.message gets non-null emojiPrefix for info', () {
       final style = resolver.resolve(
         style: _emoji(),
         kind: SectionKind.message,
-        level: Level.INFO,
+        level: LogLevel.info,
       );
       expect(
         style.emojiPrefix,
@@ -134,7 +134,7 @@ void main() {
         final style = resolver.resolve(
           style: _emoji(),
           kind: kind,
-          level: Level.INFO,
+          level: LogLevel.info,
         );
         expect(
           style.emojiPrefix,
@@ -150,35 +150,35 @@ void main() {
   // --------------------------------------------------------------------------
 
   group('Different levels → different default emojis', () {
-    test('FINE and INFO produce different emojis on message', () {
+    test('debug and info produce different emojis on message', () {
       final fineStyle = resolver.resolve(
         style: _emoji(),
         kind: SectionKind.message,
-        level: Level.FINE,
+        level: LogLevel.debug,
       );
       final infoStyle = resolver.resolve(
         style: _emoji(),
         kind: SectionKind.message,
-        level: Level.INFO,
+        level: LogLevel.info,
       );
-      // Both should be non-null (INFO and FINE both have emojis).
+      // Both should be non-null (info and debug both have emojis).
       expect(infoStyle.emojiPrefix, isNotNull);
       expect(fineStyle.emojiPrefix, isNotNull);
       expect(
         fineStyle.emojiPrefix,
         isNot(equals(infoStyle.emojiPrefix)),
-        reason: 'FINE and INFO have distinct default emojis',
+        reason: 'debug and info have distinct default emojis',
       );
     });
 
-    test('FINEST/FINER return empty-string emojiPrefix (not null)', () {
-      for (final level in [Level.FINEST, Level.FINER]) {
+    test('trace returns empty-string emojiPrefix (not null)', () {
+      for (final level in [LogLevel.trace]) {
         final style = resolver.resolve(
           style: _emoji(),
           kind: SectionKind.message,
           level: level,
         );
-        // The default for FINEST/FINER is '' — resolved as empty string or null.
+        // The default for trace is '' — resolved as empty string or null.
         // The resolver MAY return null or '' for empty strings.
         // We only assert it is NOT a non-empty emoji string.
         final ep = style.emojiPrefix;
@@ -191,16 +191,16 @@ void main() {
       }
     });
 
-    test('WARNING emoji differs from SEVERE emoji', () {
+    test('warning emoji differs from error emoji', () {
       final warnStyle = resolver.resolve(
         style: _emoji(),
         kind: SectionKind.message,
-        level: Level.WARNING,
+        level: LogLevel.warning,
       );
       final severeStyle = resolver.resolve(
         style: _emoji(),
         kind: SectionKind.message,
-        level: Level.SEVERE,
+        level: LogLevel.error,
       );
       expect(warnStyle.emojiPrefix, isNot(equals(severeStyle.emojiPrefix)));
     });
@@ -211,12 +211,12 @@ void main() {
   // --------------------------------------------------------------------------
 
   group('Custom emojis override defaults', () {
-    test('custom emoji for INFO overrides default', () {
+    test('custom emoji for info overrides default', () {
       const customEmoji = '🔵 ';
       final style = resolver.resolve(
-        style: _emoji(custom: {Level.INFO: customEmoji}),
+        style: _emoji(custom: {LogLevel.info: customEmoji}),
         kind: SectionKind.message,
-        level: Level.INFO,
+        level: LogLevel.info,
       );
       expect(
         style.emojiPrefix,
@@ -227,24 +227,23 @@ void main() {
 
     test('non-overridden level still uses default', () {
       final style = resolver.resolve(
-        style: _emoji(custom: {Level.SEVERE: '💥 '}),
+        style: _emoji(custom: {LogLevel.error: '💥 '}),
         kind: SectionKind.message,
-        level: Level.INFO,
+        level: LogLevel.info,
       );
-      // INFO default is '💡 '
+      // info default is '💡 '
       expect(
         style.emojiPrefix,
         equals('💡 '),
-        reason:
-            'INFO default should still apply when only SEVERE is overridden',
+        reason: 'info default should still apply when only error is overridden',
       );
     });
 
-    test('custom emoji for WARNING overrides default', () {
+    test('custom emoji for warning overrides default', () {
       final style = resolver.resolve(
-        style: _emoji(custom: {Level.WARNING: '🚨 '}),
+        style: _emoji(custom: {LogLevel.warning: '🚨 '}),
         kind: SectionKind.message,
-        level: Level.WARNING,
+        level: LogLevel.warning,
       );
       expect(style.emojiPrefix, equals('🚨 '));
     });
@@ -259,7 +258,7 @@ void main() {
       final style = resolver.resolve(
         style: _colored(),
         kind: SectionKind.message,
-        level: Level.INFO,
+        level: LogLevel.info,
       );
       expect(
         style.bgColor,
@@ -277,7 +276,7 @@ void main() {
       final style = resolver.resolve(
         style: _colored(),
         kind: SectionKind.timestamp,
-        level: Level.WARNING,
+        level: LogLevel.warning,
       );
       expect(style.bgColor, isNotNull);
       expect(style.textColor, isNotNull);
@@ -287,26 +286,26 @@ void main() {
       final infoStyle = resolver.resolve(
         style: _colored(),
         kind: SectionKind.message,
-        level: Level.INFO,
+        level: LogLevel.info,
       );
       final warnStyle = resolver.resolve(
         style: _colored(),
         kind: SectionKind.message,
-        level: Level.WARNING,
+        level: LogLevel.warning,
       );
       expect(
         infoStyle.bgColor,
         isNot(equals(warnStyle.bgColor)),
-        reason: 'INFO and WARNING have different bg colors',
+        reason: 'info and warning have different bg colors',
       );
     });
 
     test('custom level color overrides default', () {
       final customBg = AnsiColor.fromRGB(10, 20, 30);
       final style = resolver.resolve(
-        style: _colored(custom: {Level.INFO: customBg}),
+        style: _colored(custom: {LogLevel.info: customBg}),
         kind: SectionKind.message,
-        level: Level.INFO,
+        level: LogLevel.info,
       );
       expect(
         style.bgColor,
@@ -325,12 +324,12 @@ void main() {
       final errorStyle = resolver.resolve(
         style: _colored(),
         kind: SectionKind.error,
-        level: Level.INFO,
+        level: LogLevel.info,
       );
       final messageStyle = resolver.resolve(
         style: _colored(),
         kind: SectionKind.message,
-        level: Level.INFO,
+        level: LogLevel.info,
       );
       expect(errorStyle.bgColor, isNotNull);
       expect(
@@ -344,12 +343,12 @@ void main() {
       final infoError = resolver.resolve(
         style: _colored(),
         kind: SectionKind.error,
-        level: Level.INFO,
+        level: LogLevel.info,
       );
       final warnError = resolver.resolve(
         style: _colored(),
         kind: SectionKind.error,
-        level: Level.WARNING,
+        level: LogLevel.warning,
       );
       expect(
         infoError.bgColor,
@@ -368,7 +367,7 @@ void main() {
       final style = resolver.resolve(
         style: _colored(),
         kind: SectionKind.data,
-        level: Level.INFO,
+        level: LogLevel.info,
       );
       expect(style.bgColor, isNull);
       expect(style.textColor, isNull);
@@ -384,7 +383,7 @@ void main() {
       final style = resolver.resolve(
         style: _colored(),
         kind: SectionKind.stackTrace,
-        level: Level.SEVERE,
+        level: LogLevel.error,
       );
       expect(style.bgColor, isNull);
       expect(style.textColor, isNull);
@@ -400,7 +399,7 @@ void main() {
       final style = resolver.resolve(
         style: _prefixed(),
         kind: SectionKind.message,
-        level: Level.INFO,
+        level: LogLevel.info,
         className: 'MyClass',
         methodName: 'myMethod',
       );
@@ -415,7 +414,7 @@ void main() {
       final style = resolver.resolve(
         style: _prefixed(),
         kind: SectionKind.message,
-        level: Level.INFO,
+        level: LogLevel.info,
         className: 'MyClass',
       );
       expect(
@@ -425,11 +424,25 @@ void main() {
       );
     });
 
+    test('[methodName] format when only methodName given', () {
+      final style = resolver.resolve(
+        style: _prefixed(),
+        kind: SectionKind.message,
+        level: LogLevel.info,
+        methodName: 'myMethod',
+      );
+      expect(
+        style.bracketPrefix,
+        equals('[myMethod] '),
+        reason: 'no class → [methodName] ',
+      );
+    });
+
     test('null bracketPrefix when no className and no methodName', () {
       final style = resolver.resolve(
         style: _prefixed(),
         kind: SectionKind.message,
-        level: Level.INFO,
+        level: LogLevel.info,
       );
       expect(
         style.bracketPrefix,
@@ -450,7 +463,7 @@ void main() {
           final style = resolver.resolve(
             style: _prefixed(),
             kind: kind,
-            level: Level.INFO,
+            level: LogLevel.info,
             className: 'MyClass',
             methodName: 'myMethod',
           );
@@ -470,7 +483,7 @@ void main() {
 
   group('resolveBorder — no box → ResolvedBorderStyle.none()', () {
     test('all border fields are null when box=false', () {
-      final border = resolver.resolveBorder(_plain(), Level.INFO);
+      final border = resolver.resolveBorder(_plain(), LogLevel.info);
       expect(border.topBorder, isNull);
       expect(border.bottomBorder, isNull);
       expect(border.divider, isNull);
@@ -483,7 +496,7 @@ void main() {
 
   group('resolveBorder — box=true → borders with ┌/└/├', () {
     test('topBorder contains ┌', () {
-      final border = resolver.resolveBorder(_boxed(), Level.INFO);
+      final border = resolver.resolveBorder(_boxed(), LogLevel.info);
       expect(border.topBorder, isNotNull);
       expect(
         border.topBorder,
@@ -493,19 +506,19 @@ void main() {
     });
 
     test('bottomBorder contains └', () {
-      final border = resolver.resolveBorder(_boxed(), Level.INFO);
+      final border = resolver.resolveBorder(_boxed(), LogLevel.info);
       expect(border.bottomBorder, isNotNull);
       expect(border.bottomBorder, contains('└'));
     });
 
     test('divider contains ├', () {
-      final border = resolver.resolveBorder(_boxed(), Level.INFO);
+      final border = resolver.resolveBorder(_boxed(), LogLevel.info);
       expect(border.divider, isNotNull);
       expect(border.divider, contains('├'));
     });
 
     test('borders contain ─ (solid) or ┄ (dashed) fill characters', () {
-      final border = resolver.resolveBorder(_boxed(), Level.INFO);
+      final border = resolver.resolveBorder(_boxed(), LogLevel.info);
       // Top and bottom use solid lines, divider uses dashed.
       expect(border.topBorder, anyOf(contains('─'), contains('┄')));
       expect(border.bottomBorder, anyOf(contains('─'), contains('┄')));
@@ -515,11 +528,11 @@ void main() {
     test('border length respects lineLength', () {
       final border80 = resolver.resolveBorder(
         _boxed(lineLength: 80),
-        Level.INFO,
+        LogLevel.info,
       );
       final border120 = resolver.resolveBorder(
         _boxed(lineLength: 120),
-        Level.INFO,
+        LogLevel.info,
       );
       // Strip ANSI codes before measuring — compare relative lengths.
       final raw80 = _stripAnsi(border80.topBorder!);
@@ -542,7 +555,7 @@ void main() {
         ..box = true
         ..ansiColors = true
         ..prefix = false;
-      final border = resolver.resolveBorder(style, Level.INFO);
+      final border = resolver.resolveBorder(style, LogLevel.info);
       expect(
         border.topBorder,
         contains('\x1b['),
@@ -555,7 +568,7 @@ void main() {
         ..box = true
         ..ansiColors = true
         ..prefix = false;
-      final border = resolver.resolveBorder(style, Level.INFO);
+      final border = resolver.resolveBorder(style, LogLevel.info);
       expect(border.bottomBorder, contains('\x1b['));
     });
 
@@ -564,12 +577,12 @@ void main() {
         ..box = true
         ..ansiColors = true
         ..prefix = false;
-      final border = resolver.resolveBorder(style, Level.INFO);
+      final border = resolver.resolveBorder(style, LogLevel.info);
       expect(border.divider, contains('\x1b['));
     });
 
     test('box without ansiColors does NOT contain ESC sequence', () {
-      final border = resolver.resolveBorder(_boxed(), Level.INFO);
+      final border = resolver.resolveBorder(_boxed(), LogLevel.info);
       expect(
         border.topBorder,
         isNot(contains('\x1b[')),

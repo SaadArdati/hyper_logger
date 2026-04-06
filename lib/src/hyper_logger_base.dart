@@ -2,26 +2,28 @@ import 'dart:async';
 
 import 'package:logging/logging.dart' as logging;
 
-import 'delegates/analytics_delegate.dart';
 import 'delegates/crash_reporting_delegate.dart';
-import 'hyper_logger_wrapper.dart';
+import 'scoped_logger.dart';
 import 'lru_cache.dart';
+import 'model/log_entry.dart';
+import 'model/log_level.dart';
 import 'model/log_message.dart';
+import 'model/log_mode.dart';
 import 'model/logger_options.dart';
 import 'printer/log_printer.dart';
 import 'printer/printer_factory.dart';
 
-/// A log filter predicate. Return `true` to allow the record through,
+/// A log filter predicate. Return `true` to allow the entry through,
 /// `false` to suppress it.
-typedef LogFilter = bool Function(logging.LogRecord record);
+typedef LogFilter = bool Function(LogEntry entry);
 
 /// The central static logging API for [hyper_logger].
 ///
 /// ### Lifecycle
 /// 1. Call [init] once at app startup to wire up the printer and optional
 ///    filter.
-/// 2. Optionally call [attachServices] to wire in crash-reporting and/or
-///    analytics delegates that receive certain log events.
+/// 2. Optionally call [attachServices] to wire in a crash-reporting
+///    delegate that receives certain log events.
 /// 3. Use [info], [debug], [warning], [error], [fatal], [stopwatch], and
 ///    [trace] to emit log records.
 ///
@@ -29,22 +31,22 @@ typedef LogFilter = bool Function(logging.LogRecord record);
 /// - Every public log method is generic (`<T>`) so that the type parameter
 ///   is forwarded into [LogMessage.type] for prefix rendering.
 /// - A per-type-name [logging.Logger] cache avoids repeated allocations.
-/// - Delegate calls ([CrashReportingDelegate], [AnalyticsDelegate]) are
-///   fire-and-forget: their futures are ignored so that logging never blocks
-///   the caller.
-/// - [silent] mode suppresses all printer output without tearing down the
-///   logger tree, useful for tests that don't want console noise.
+/// - Delegate calls ([CrashReportingDelegate]) are fire-and-forget: their
+///   futures are ignored so that logging never blocks the caller.
+/// - [LogMode] controls global behavior: [LogMode.enabled] for normal
+///   operation, [LogMode.silent] to suppress printer output (delegates
+///   still fire), or [LogMode.disabled] for a complete no-op.
 class HyperLogger {
   HyperLogger._();
 
   // ── private state ──────────────────────────────────────────────────────────
 
   static bool _initialized = false;
-  static bool _silent = false;
+  static LogMode _mode = LogMode.enabled;
+  static bool _captureStackTrace = true;
   static LogPrinter? _printer;
   static LogFilter? _logFilter;
   static CrashReportingDelegate? _crashReporting;
-  static AnalyticsDelegate? _analytics;
 
   /// Default maximum number of entries in each LRU cache.
   static const int defaultMaxCacheSize = 256;
@@ -54,8 +56,8 @@ class HyperLogger {
     defaultMaxCacheSize,
   );
 
-  /// Cache of [HyperLoggerWrapper] instances keyed by type name + options.
-  static LruCache<String, HyperLoggerWrapper> _wrapperCache = LruCache(
+  /// Cache of [ScopedLogger] instances keyed by type name + options.
+  static LruCache<String, ScopedLogger> _wrapperCache = LruCache(
     defaultMaxCacheSize,
   );
 
@@ -73,18 +75,28 @@ class HyperLogger {
   /// - [printer] receives formatted log records. Defaults to the
   ///   platform-appropriate printer ([ComposablePrinter.terminal] on native,
   ///   [WebConsolePrinter] on web).
-  /// - [silent] suppresses all printer output. Useful for tests or production.
-  /// - [logFilter] is applied to every record before printing. The
-  ///   [defaultLogFilter] is a good starting point.
+  /// - [mode] controls global logging behavior. See [LogMode].
+  /// - [logFilter] is applied to every record before printing.
+  /// - [captureStackTrace] when `true` (default), captures [StackTrace.current]
+  ///   on every log call that doesn't provide a `method:` parameter, enabling
+  ///   automatic caller extraction. Set to `false` to skip the ~700ns overhead.
+  /// - [configureLoggingPackage] when `true` (default), sets
+  ///   `hierarchicalLoggingEnabled = true` and `Logger.root.level = Level.ALL`
+  ///   on the underlying `package:logging`. Set to `false` if another package
+  ///   manages the logging configuration and you don't want hyper_logger to
+  ///   override it.
   /// - [maxCacheSize] controls the maximum number of entries in the internal
   ///   logger and wrapper LRU caches. Defaults to [defaultMaxCacheSize] (256).
   static void init({
     LogPrinter? printer,
-    bool silent = false,
+    LogMode mode = LogMode.enabled,
     LogFilter? logFilter,
+    bool captureStackTrace = true,
+    bool configureLoggingPackage = true,
     int maxCacheSize = defaultMaxCacheSize,
   }) {
-    _silent = silent;
+    _mode = mode;
+    _captureStackTrace = captureStackTrace;
     _printer =
         printer ?? (_initialized ? _printer : null) ?? createDefaultPrinter();
     _logFilter = logFilter;
@@ -96,67 +108,70 @@ class HyperLogger {
 
     if (!_initialized) {
       _initialized = true;
-      logging.hierarchicalLoggingEnabled = true;
-      logging.Logger.root.level = logging.Level.ALL;
+      if (configureLoggingPackage) {
+        logging.hierarchicalLoggingEnabled = true;
+        logging.Logger.root.level = logging.Level.ALL;
+      }
       _subscription = logging.Logger.root.onRecord.listen(_handleLogRecord);
     }
   }
 
-  /// Attaches optional service delegates that receive certain log events.
+  /// Attaches the crash-reporting delegate that receives certain log events.
   ///
-  /// - [crashReporting] receives [warning] messages (via [CrashReportingDelegate.log])
-  ///   and [error]/[fatal] messages (via [CrashReportingDelegate.recordError]).
-  /// - [analytics] receives [stopwatch] performance events.
-  static void attachServices({
-    CrashReportingDelegate? crashReporting,
-    AnalyticsDelegate? analytics,
-  }) {
+  /// [crashReporting] receives [warning] messages (via [CrashReportingDelegate.log])
+  /// and [error]/[fatal] messages (via [CrashReportingDelegate.recordError]).
+  static void attachServices({CrashReportingDelegate? crashReporting}) {
     _crashReporting = crashReporting;
-    _analytics = analytics;
   }
+
+  /// The currently attached crash-reporting delegate, or `null`.
+  static CrashReportingDelegate? get crashReporting => _crashReporting;
 
   /// Detaches all service delegates. Intended for test teardown.
   static void detachServices() {
     _crashReporting = null;
-    _analytics = null;
   }
 
   /// Resets all static state. Intended for test teardown so that each test
   /// starts with a clean slate.
   static void reset() {
     _initialized = false;
-    _silent = false;
+    _mode = LogMode.enabled;
+    _captureStackTrace = true;
     _printer = null;
     _logFilter = null;
     _crashReporting = null;
-    _analytics = null;
     _subscription?.cancel();
     _subscription = null;
     _loggerCache.clear();
     _wrapperCache.clear();
   }
 
-  // ── log filtering ──────────────────────────────────────────────────────────
-
-  /// Default filter that suppresses noisy Supabase GoTrue messages.
-  ///
-  /// Returns `true` to allow the record, `false` to suppress.
-  static bool defaultLogFilter(logging.LogRecord record) {
-    final name = record.loggerName.toLowerCase();
-    if (name.contains('gotrue')) return false;
-    if (name.contains('supabase') && name.contains('auth')) return false;
-    return true;
-  }
-
   // ── log level ──────────────────────────────────────────────────────────────
+
+  /// Returns `true` if a log call at [level] would produce output.
+  ///
+  /// Use to gate expensive argument construction:
+  /// ```dart
+  /// if (HyperLogger.isEnabled(LogLevel.debug)) {
+  ///   final data = computeExpensiveDebugInfo();
+  ///   HyperLogger.debug<MyClass>('State dump', data: data);
+  /// }
+  /// ```
+  static bool isEnabled(LogLevel level) {
+    if (_mode == LogMode.disabled) return false;
+    if (_mode == LogMode.silent) return false;
+    _ensureInitialized();
+    return logging.Logger.root.level <= level.toLoggingLevel();
+  }
 
   /// Sets the log level on the root logger. Only records at or above this
   /// level will be emitted.
   ///
   /// Child loggers inherit root's level by default, so this call controls
   /// the effective threshold for all loggers.
-  static void setLogLevel(logging.Level level) {
-    logging.Logger.root.level = level;
+  static void setLogLevel(LogLevel level) {
+    logging.Logger.root.level = level.toLoggingLevel();
   }
 
   // ── convenience log methods ────────────────────────────────────────────────
@@ -171,8 +186,9 @@ class HyperLogger {
   /// HyperLogger.trace<JsonParser>('Token buffer state', data: buffer);
   /// ```
   static void trace<T>(String message, {Object? data, String? method}) {
+    if (_mode == LogMode.disabled) return;
     _ensureInitialized();
-    if (_silent) return;
+    if (_mode == LogMode.silent) return;
     _log<T>(logging.Level.FINEST, message, data: data, method: method);
   }
 
@@ -186,8 +202,9 @@ class HyperLogger {
   /// HyperLogger.debug<AuthService>('Token refreshed', data: claims);
   /// ```
   static void debug<T>(String message, {Object? data, String? method}) {
+    if (_mode == LogMode.disabled) return;
     _ensureInitialized();
-    if (_silent) return;
+    if (_mode == LogMode.silent) return;
     _log<T>(logging.Level.FINE, message, data: data, method: method);
   }
 
@@ -201,8 +218,9 @@ class HyperLogger {
   /// HyperLogger.info<SyncEngine>('Pull completed', data: {'rows': count});
   /// ```
   static void info<T>(String message, {Object? data, String? method}) {
+    if (_mode == LogMode.disabled) return;
     _ensureInitialized();
-    if (_silent) return;
+    if (_mode == LogMode.silent) return;
     _log<T>(logging.Level.INFO, message, data: data, method: method);
   }
 
@@ -217,10 +235,11 @@ class HyperLogger {
   /// HyperLogger.warning<CacheManager>('Stale entry evicted', data: key);
   /// ```
   static void warning<T>(String message, {Object? data, String? method}) {
+    if (_mode == LogMode.disabled) return;
     _ensureInitialized();
-    // Delegates fire regardless of silent mode.
-    _crashReporting?.log(message).ignore();
-    if (_silent) return;
+    // Delegates fire in silent mode.
+    _fireDelegate(() => _crashReporting?.log(message));
+    if (_mode == LogMode.silent) return;
     _log<T>(logging.Level.WARNING, message, data: data, method: method);
   }
 
@@ -248,14 +267,19 @@ class HyperLogger {
     String? method,
     bool skipCrashReporting = false,
   }) {
+    if (_mode == LogMode.disabled) return;
     _ensureInitialized();
-    // Delegates fire regardless of silent mode.
+    // Delegates fire in silent mode.
     if (!skipCrashReporting) {
-      _crashReporting
-          ?.recordError(exception ?? message, stackTrace, reason: message)
-          .ignore();
+      _fireDelegate(
+        () => _crashReporting?.recordError(
+          exception ?? message,
+          stackTrace,
+          reason: message,
+        ),
+      );
     }
-    if (_silent) return;
+    if (_mode == LogMode.silent) return;
     _log<T>(
       logging.Level.SEVERE,
       message,
@@ -288,17 +312,18 @@ class HyperLogger {
     Object? data,
     String? method,
   }) {
+    if (_mode == LogMode.disabled) return;
     _ensureInitialized();
-    // Delegates fire regardless of silent mode.
-    _crashReporting
-        ?.recordError(
-          exception ?? message,
-          stackTrace,
-          fatal: true,
-          reason: message,
-        )
-        .ignore();
-    if (_silent) return;
+    // Delegates fire in silent mode.
+    _fireDelegate(
+      () => _crashReporting?.recordError(
+        exception ?? message,
+        stackTrace,
+        fatal: true,
+        reason: message,
+      ),
+    );
+    if (_mode == LogMode.silent) return;
     _log<T>(
       logging.Level.SHOUT,
       message,
@@ -309,11 +334,10 @@ class HyperLogger {
     );
   }
 
-  /// Logs the elapsed time of [stopwatch] at [logging.Level.INFO] and
-  /// forwards the duration to [AnalyticsDelegate.logPerformance].
+  /// Logs the elapsed time of [stopwatch] at [logging.Level.INFO].
   ///
   /// Use to instrument performance-sensitive operations. The elapsed
-  /// duration is included in the log message and sent to analytics.
+  /// duration is included in the log message.
   ///
   /// ```dart
   /// final sw = Stopwatch()..start();
@@ -326,49 +350,58 @@ class HyperLogger {
     Stopwatch stopwatch, {
     String? method,
   }) {
+    if (_mode == LogMode.disabled) return;
     _ensureInitialized();
-    // Analytics fires regardless of silent mode.
+    if (_mode == LogMode.silent) return;
     final elapsed = stopwatch.elapsed;
-    _analytics?.logPerformance(message, elapsed, source: T.toString()).ignore();
-    if (_silent) return;
     final formatted = '$message (${elapsed.inMilliseconds}ms)';
     _log<T>(logging.Level.INFO, formatted, method: method);
   }
 
   // ── wrapper factory ────────────────────────────────────────────────────────
 
-  /// Returns a cached [HyperLoggerWrapper] for type [T] with the given
-  /// [options].
+  /// Returns a cached [ScopedLogger] for type [T] with inline options.
   ///
-  /// The wrapper is cached by a key derived from the type name and options,
-  /// so repeated calls with the same arguments return the same instance.
+  /// Cached by type + options — repeated calls with the same arguments
+  /// return the same instance.
   ///
-  /// Accepts either a full [LoggerOptions] object or individual parameters
-  /// for convenience. When [options] is provided, all other parameters are
-  /// ignored.
-  static HyperLoggerWrapper<T> withOptions<T>({
-    LoggerOptions? options,
-    bool disabled = false,
-    logging.Level? minLevel,
+  /// ```dart
+  /// final log = HyperLogger.withOptions<PaymentService>(tag: 'payments');
+  /// ```
+  static ScopedLogger<T> withOptions<T>({
+    LogMode mode = LogMode.enabled,
+    LogLevel? minLevel,
     String? tag,
     bool skipCrashReporting = false,
-    LogPrinter? printer,
   }) {
-    final resolved =
-        options ??
-        LoggerOptions(
-          disabled: disabled,
-          minLevel: minLevel,
-          tag: tag,
-          skipCrashReporting: skipCrashReporting,
-          printer: printer,
-        );
-    final key = resolved.cacheKey(T.toString());
+    return _cached<T>(
+      LoggerOptions(
+        mode: mode,
+        minLevel: minLevel,
+        tag: tag,
+        skipCrashReporting: skipCrashReporting,
+      ),
+    );
+  }
+
+  /// Returns a cached [ScopedLogger] for type [T] from a pre-built
+  /// [LoggerOptions] object.
+  ///
+  /// ```dart
+  /// const opts = LoggerOptions(tag: 'billing', minLevel: LogLevel.warning);
+  /// final log = HyperLogger.fromOptions<Billing>(opts);
+  /// ```
+  static ScopedLogger<T> fromOptions<T>(LoggerOptions options) {
+    return _cached<T>(options);
+  }
+
+  static ScopedLogger<T> _cached<T>(LoggerOptions options) {
+    final key = options.cacheKey(T.toString());
     return _wrapperCache.putIfAbsent(
           key,
-          () => HyperLoggerWrapper<T>(options: resolved),
+          () => ScopedLogger<T>(options: options),
         )
-        as HyperLoggerWrapper<T>;
+        as ScopedLogger<T>;
   }
 
   // ── private helpers ────────────────────────────────────────────────────────
@@ -396,8 +429,10 @@ class HyperLogger {
     StackTrace? stackTrace,
   }) {
     // Skip the expensive StackTrace.current capture when method is already
-    // provided — the caller extractor won't be invoked anyway.
-    final callerStack = method == null ? StackTrace.current : null;
+    // provided or when capture is disabled via init(captureStackTrace: false).
+    final callerStack = _captureStackTrace && method == null
+        ? StackTrace.current
+        : null;
     final logMessage = LogMessage(
       message,
       T,
@@ -411,11 +446,27 @@ class HyperLogger {
     logger.log(level, logMessage, error, stackTrace);
   }
 
+  /// Fires a delegate call, catching and swallowing any error so that
+  /// logging never crashes the app. The returned [Future] (if any) is
+  /// awaited with an error handler that also swallows.
+  static void _fireDelegate(Future<void>? Function() fn) {
+    try {
+      fn()?.catchError((_) {});
+    } catch (_) {
+      // Synchronous throw from the delegate — swallow.
+    }
+  }
+
   /// Listener wired to [logging.Logger.root.onRecord].
   static void _handleLogRecord(logging.LogRecord record) {
-    if (_silent) return;
-    if (_logFilter != null && !_logFilter!(record)) return;
-    _printer?.log(record);
+    if (_mode != LogMode.enabled) return;
+    try {
+      final entry = LogEntry.fromLogRecord(record);
+      if (_logFilter != null && !_logFilter!(entry)) return;
+      _printer?.log(entry);
+    } catch (_) {
+      // Logging should never crash the app.
+    }
   }
 
   /// Auto-initializes with platform defaults if [init] hasn't been called.

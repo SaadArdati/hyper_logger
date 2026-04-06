@@ -1,7 +1,7 @@
 import 'dart:convert';
 
-import 'package:logging/logging.dart' as logging;
-
+import '../model/log_entry.dart';
+import '../model/log_level.dart';
 import '../model/log_message.dart';
 import 'log_printer.dart';
 
@@ -13,68 +13,53 @@ import 'log_printer.dart';
 /// the contract consistent with [ComposablePrinter.format].
 ///
 /// ### Level → severity mapping
-/// | dart:logging level   | Cloud Logging severity |
-/// |----------------------|------------------------|
-/// | FINEST / FINE        | DEBUG                  |
-/// | INFO                 | INFO                   |
-/// | WARNING              | WARNING                |
-/// | SEVERE               | ERROR                  |
-/// | SHOUT                | CRITICAL               |
-///
-/// ### Structured payload
-/// When the [logging.LogRecord.object] is a [LogMessage] its [LogMessage.data]
-/// field (if present) is merged into the top-level JSON object under the key
-/// `"data"`. The [LogMessage.message] overrides [logging.LogRecord.message].
+/// | LogLevel   | Cloud Logging severity |
+/// |------------|------------------------|
+/// | trace/debug| DEBUG                  |
+/// | info       | INFO                   |
+/// | warning    | WARNING                |
+/// | error      | ERROR                  |
+/// | fatal      | CRITICAL               |
 class JsonPrinter implements LogPrinter {
   /// Sink for formatted output. Defaults to [print].
-  final void Function(String) output;
+  final LogOutput output;
 
   const JsonPrinter({this.output = print});
 
   @override
-  void log(logging.LogRecord record) {
-    final lines = format(record);
+  void log(LogEntry entry) {
+    final lines = format(entry);
     for (int i = 0; i < lines.length; i++) {
       output(lines[i]);
     }
   }
 
-  /// Formats [record] into a list of output lines (always exactly one line).
-  ///
-  /// Returns a single JSON string per invocation.
-  List<String> format(logging.LogRecord record) {
+  /// Formats [entry] into a list of output lines (always exactly one line).
+  List<String> format(LogEntry entry) {
     final map = <String, Object?>{};
 
-    // severity — Cloud Logging structured log field.
-    map['severity'] = _severity(record.level);
+    map['severity'] = _severity(entry.level);
 
-    // message
-    final object = record.object;
+    final object = entry.object;
     if (object is LogMessage) {
       map['message'] = object.message;
-      // structured data merged at top level under "data" key
       final data = object.data;
       if (data != null) {
         map['data'] = data;
       }
     } else {
-      map['message'] = record.message;
+      map['message'] = entry.message;
     }
 
-    // timestamp — ISO-8601 UTC
-    map['timestamp'] = record.time.toUtc().toIso8601String();
+    map['timestamp'] = entry.time.toUtc().toIso8601String();
+    map['logger'] = entry.loggerName;
 
-    // logger name
-    map['logger'] = record.loggerName;
-
-    // optional error
-    final error = record.error;
+    final error = entry.error;
     if (error != null) {
       map['error'] = error.toString();
     }
 
-    // optional stack trace
-    final stackTrace = record.stackTrace;
+    final stackTrace = entry.stackTrace;
     if (stackTrace != null) {
       map['stackTrace'] = stackTrace.toString();
     }
@@ -83,13 +68,12 @@ class JsonPrinter implements LogPrinter {
     return [encoder.convert(map)];
   }
 
-  /// Maps a [logging.Level] to its Cloud Logging severity string.
-  static String _severity(logging.Level level) {
-    if (level.value <= logging.Level.FINE.value) return 'DEBUG';
-    if (level == logging.Level.INFO) return 'INFO';
-    if (level == logging.Level.WARNING) return 'WARNING';
-    if (level == logging.Level.SEVERE) return 'ERROR';
-    // SHOUT and anything above
-    return 'CRITICAL';
-  }
+  /// Maps a [LogLevel] to its Cloud Logging severity string.
+  static String _severity(LogLevel level) => switch (level) {
+    LogLevel.trace || LogLevel.debug => 'DEBUG',
+    LogLevel.info => 'INFO',
+    LogLevel.warning => 'WARNING',
+    LogLevel.error => 'ERROR',
+    LogLevel.fatal => 'CRITICAL',
+  };
 }

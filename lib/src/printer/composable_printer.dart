@@ -1,9 +1,8 @@
-import 'package:logging/logging.dart' as logging;
-
 import '../decorators/log_decorator.dart';
 import '../extraction/caller_extractor.dart';
 import '../extraction/content_extractor.dart';
 import '../extraction/stack_trace_parser.dart';
+import '../model/log_entry.dart';
 import '../model/log_style.dart';
 import '../rendering/log_renderer.dart';
 import '../rendering/section_renderer.dart';
@@ -19,7 +18,7 @@ import 'log_printer.dart';
 ///
 /// ### Pipeline
 /// ```
-/// LogRecord
+/// LogEntry
 ///   → ContentExtractor.extract()   (parse sections, className, methodName)
 ///   → StyleResolver.resolve*()     (map LogStyle flags → ResolvedStyle)
 ///   → LogRenderer.render()         (assemble lines)
@@ -37,7 +36,7 @@ class ComposablePrinter implements LogPrinter {
   late final LogStyle style;
 
   /// Sink for formatted lines. Defaults to [print].
-  final void Function(String) output;
+  final LogOutput output;
 
   late final ContentExtractor _extractor;
   late final StyleResolver _resolver;
@@ -69,18 +68,18 @@ class ComposablePrinter implements LogPrinter {
   }
 
   @override
-  void log(logging.LogRecord record) {
-    final lines = format(record);
+  void log(LogEntry entry) {
+    final lines = format(entry);
     for (int i = 0; i < lines.length; i++) {
       output(lines[i]);
     }
   }
 
-  /// Formats [record] into a flat list of output lines without emitting them.
+  /// Formats [entry] into a flat list of output lines without emitting them.
   ///
   /// Useful for testing and for printers that buffer output.
-  List<String> format(logging.LogRecord record) {
-    final extraction = _extractor.extract(record);
+  List<String> format(LogEntry entry) {
+    final extraction = _extractor.extract(entry);
     return _renderer.render(extraction, style, _resolver);
   }
 }

@@ -2,7 +2,7 @@
 /// Benchmark comparing String.split('\n') alternatives for single-line messages.
 ///
 /// Context: In a logging hot path, most messages are single-line. Calling
-/// `message.split('\n')` unconditionally allocates a new List<String> with one
+/// `message.split('\n')` unconditionally allocates a new `List<String>` with one
 /// element even when there's nothing to split. This benchmark measures
 /// alternatives.
 ///

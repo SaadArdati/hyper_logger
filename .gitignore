@@ -16,3 +16,9 @@ Thumbs.db
 .metadata
 *.log
 firebase-debug.log
+
+# Coverage
+coverage/
+
+# Tool dependencies
+tool/

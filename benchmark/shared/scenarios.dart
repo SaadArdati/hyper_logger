@@ -1,38 +1,37 @@
 import 'package:hyper_logger/hyper_logger.dart';
-import 'package:logging/logging.dart' as logging;
 
-/// Pre-built log records for benchmarking.
+/// Pre-built log entries for benchmarking.
 ///
-/// Each record is constructed once and reused across iterations to measure
-/// only the printer pipeline cost, not LogRecord/LogMessage allocation.
+/// Each entry is constructed once and reused across iterations to measure
+/// only the printer pipeline cost, not LogEntry/LogMessage allocation.
 class BenchmarkScenarios {
   BenchmarkScenarios._();
 
   // ── Simple message (most common path) ───────────────────────────────────
 
-  static final logging.LogRecord simpleInfo = _record(
-    logging.Level.INFO,
+  static final LogEntry simpleInfo = _entry(
+    LogLevel.info,
     'User logged in successfully',
     'AuthBloc',
     'onLogin',
   );
 
-  static final logging.LogRecord simpleDebug = _record(
-    logging.Level.FINE,
+  static final LogEntry simpleDebug = _entry(
+    LogLevel.debug,
     'Token refreshed',
     'AuthService',
     'refreshToken',
   );
 
-  static final logging.LogRecord simpleWarning = _record(
-    logging.Level.WARNING,
+  static final LogEntry simpleWarning = _entry(
+    LogLevel.warning,
     'Rate limit approaching threshold',
     'ApiClient',
     'request',
   );
 
-  static final logging.LogRecord simpleSevere = _record(
-    logging.Level.SEVERE,
+  static final LogEntry simpleSevere = _entry(
+    LogLevel.error,
     'Connection failed after 3 retries',
     'WebSocket',
     'connect',
@@ -40,8 +39,8 @@ class BenchmarkScenarios {
 
   // ── Message with structured data ────────────────────────────────────────
 
-  static final logging.LogRecord withData = _record(
-    logging.Level.INFO,
+  static final LogEntry withData = _entry(
+    LogLevel.info,
     'Portfolio positions loaded',
     'PortfolioCubit',
     'load',
@@ -55,26 +54,30 @@ class BenchmarkScenarios {
 
   // ── Message with error + stack trace ────────────────────────────────────
 
-  static final logging.LogRecord withError = () {
+  static final LogEntry withError = () {
     final error = FormatException('Unexpected character at position 42');
     // Capture a real stack trace for realistic parsing cost.
     final stack = StackTrace.current;
-    return logging.LogRecord(
-      logging.Level.SEVERE,
-      'Failed to parse API response',
-      'ApiClient',
-      error,
-      stack,
-      null,
-      LogMessage('Failed to parse API response', String, method: 'parseJson'),
+    return LogEntry(
+      level: LogLevel.error,
+      message: 'Failed to parse API response',
+      object: LogMessage(
+        'Failed to parse API response',
+        String,
+        method: 'parseJson',
+      ),
+      loggerName: 'ApiClient',
+      time: DateTime.now(),
+      error: error,
+      stackTrace: stack,
     );
   }();
 
   // ── Varied messages (prevents constant folding) ─────────────────────────
 
-  static final List<logging.LogRecord> varied = List.generate(
+  static final List<LogEntry> varied = List.generate(
     100,
-    (i) => _record(
+    (i) => _entry(
       _levels[i % _levels.length],
       'Message variant $i with some payload text',
       'Service${i % 10}',
@@ -85,28 +88,26 @@ class BenchmarkScenarios {
   // ── Helpers ─────────────────────────────────────────────────────────────
 
   static final _levels = [
-    logging.Level.FINE,
-    logging.Level.INFO,
-    logging.Level.WARNING,
-    logging.Level.SEVERE,
+    LogLevel.debug,
+    LogLevel.info,
+    LogLevel.warning,
+    LogLevel.error,
   ];
 
-  static logging.LogRecord _record(
-    logging.Level level,
+  static LogEntry _entry(
+    LogLevel level,
     String message,
     String loggerName,
     String method, {
     Object? data,
   }) {
     final logMessage = LogMessage(message, String, method: method, data: data);
-    return logging.LogRecord(
-      level,
-      message,
-      loggerName,
-      null,
-      null,
-      null,
-      logMessage,
+    return LogEntry(
+      level: level,
+      message: message,
+      object: logMessage,
+      loggerName: loggerName,
+      time: DateTime.now(),
     );
   }
 }

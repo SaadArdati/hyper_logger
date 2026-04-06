@@ -70,7 +70,7 @@ void main() {
     });
 
     test('sets custom emojis', () {
-      final emojis = {Level.INFO: '💡', Level.WARNING: '⚠️'};
+      final emojis = {LogLevel.info: '💡', LogLevel.warning: '⚠️'};
       final style = _apply([EmojiDecorator(customEmojis: emojis)]);
       expect(style.emoji, isTrue);
       expect(style.levelEmojis, same(emojis));
@@ -85,7 +85,7 @@ void main() {
     });
 
     test('sets custom level colors', () {
-      final colors = {Level.SEVERE: AnsiColor.red};
+      final colors = {LogLevel.error: AnsiColor.red};
       final style = _apply([AnsiColorDecorator(customLevelColors: colors)]);
       expect(style.ansiColors, isTrue);
       expect(style.levelColors, same(colors));
@@ -140,8 +140,8 @@ void main() {
   });
 
   group('order independence — custom config preserved', () {
-    final customEmojis = {Level.INFO: '🔵'};
-    final customColors = {Level.WARNING: AnsiColor.yellow};
+    final customEmojis = {LogLevel.info: '🔵'};
+    final customColors = {LogLevel.warning: AnsiColor.yellow};
     String customFormatter(DateTime dt) => dt.millisecondsSinceEpoch.toString();
 
     final decorators = [

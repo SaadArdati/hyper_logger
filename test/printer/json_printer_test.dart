@@ -1,35 +1,34 @@
 import 'dart:convert';
 
 import 'package:hyper_logger/hyper_logger.dart';
-import 'package:logging/logging.dart' as logging;
 import 'package:test/test.dart';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Builds a minimal [logging.LogRecord].
-logging.LogRecord _record({
+/// Builds a minimal [LogEntry].
+LogEntry _record({
   String message = 'test message',
   Object? object,
-  logging.Level level = logging.Level.INFO,
+  LogLevel level = LogLevel.info,
   Object? error,
   StackTrace? stackTrace,
 }) {
-  return logging.LogRecord(
-    level,
-    message,
-    'test.logger',
-    error,
-    stackTrace,
-    null,
-    object,
+  return LogEntry(
+    level: level,
+    message: message,
+    object: object,
+    loggerName: 'test.logger',
+    time: DateTime.now(),
+    error: error,
+    stackTrace: stackTrace,
   );
 }
 
-/// Formats [record] via a [JsonPrinter] and parses the resulting JSON.
-Map<String, dynamic> _parse(logging.LogRecord record) {
+/// Formats [entry] via a [JsonPrinter] and parses the resulting JSON.
+Map<String, dynamic> _parse(LogEntry entry) {
   final captured = <String>[];
   final printer = JsonPrinter(output: captured.add);
-  printer.log(record);
+  printer.log(entry);
   expect(captured, hasLength(1), reason: 'expected exactly one JSON line');
   return jsonDecode(captured.first) as Map<String, dynamic>;
 }
@@ -51,7 +50,7 @@ void main() {
     });
 
     test('includes severity field', () {
-      final json = _parse(_record(level: logging.Level.INFO));
+      final json = _parse(_record(level: LogLevel.info));
       expect(json.containsKey('severity'), isTrue);
     });
 
@@ -79,38 +78,38 @@ void main() {
   // ── Level → severity mapping ──────────────────────────────────────────────
 
   group('JsonPrinter level → severity mapping', () {
-    test('FINEST → DEBUG', () {
-      final json = _parse(_record(level: logging.Level.FINEST));
+    test('trace → DEBUG', () {
+      final json = _parse(_record(level: LogLevel.trace));
       expect(json['severity'], equals('DEBUG'));
     });
 
-    test('FINER → DEBUG', () {
-      final json = _parse(_record(level: logging.Level.FINER));
+    test('trace → DEBUG (second trace alias)', () {
+      final json = _parse(_record(level: LogLevel.trace));
       expect(json['severity'], equals('DEBUG'));
     });
 
-    test('FINE → DEBUG', () {
-      final json = _parse(_record(level: logging.Level.FINE));
+    test('debug → DEBUG', () {
+      final json = _parse(_record(level: LogLevel.debug));
       expect(json['severity'], equals('DEBUG'));
     });
 
-    test('INFO → INFO', () {
-      final json = _parse(_record(level: logging.Level.INFO));
+    test('info → INFO', () {
+      final json = _parse(_record(level: LogLevel.info));
       expect(json['severity'], equals('INFO'));
     });
 
-    test('WARNING → WARNING', () {
-      final json = _parse(_record(level: logging.Level.WARNING));
+    test('warning → WARNING', () {
+      final json = _parse(_record(level: LogLevel.warning));
       expect(json['severity'], equals('WARNING'));
     });
 
-    test('SEVERE → ERROR', () {
-      final json = _parse(_record(level: logging.Level.SEVERE));
+    test('error → ERROR', () {
+      final json = _parse(_record(level: LogLevel.error));
       expect(json['severity'], equals('ERROR'));
     });
 
-    test('SHOUT → CRITICAL', () {
-      final json = _parse(_record(level: logging.Level.SHOUT));
+    test('fatal → CRITICAL', () {
+      final json = _parse(_record(level: LogLevel.fatal));
       expect(json['severity'], equals('CRITICAL'));
     });
   });

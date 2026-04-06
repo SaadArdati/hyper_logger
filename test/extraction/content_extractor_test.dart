@@ -2,28 +2,96 @@ import 'dart:convert';
 
 import 'package:hyper_logger/hyper_logger.dart';
 import 'package:hyper_logger/src/extraction/caller_extractor.dart';
-import 'package:logging/logging.dart' as logging;
 import 'package:test/test.dart';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/// Builds a minimal [logging.LogRecord] from the supplied values.
-logging.LogRecord _record({
+/// Builds a minimal [LogEntry] from the supplied values.
+LogEntry _record({
   String message = '',
   Object? object,
   Object? error,
   StackTrace? stackTrace,
-  logging.Level level = logging.Level.INFO,
+  LogLevel level = LogLevel.info,
 }) {
-  return logging.LogRecord(
-    level,
-    message,
-    'test.logger',
-    error,
-    stackTrace,
-    null,
-    object,
+  return LogEntry(
+    level: level,
+    message: message,
+    object: object,
+    loggerName: 'test.logger',
+    time: DateTime.now(),
+    error: error,
+    stackTrace: stackTrace,
   );
+}
+
+/// An object whose [toString] always throws, useful for testing fallback paths.
+class _ThrowingToString {
+  @override
+  String toString() => throw StateError('poison toString');
+}
+
+/// A Map wrapper whose JSON encoding fails (because it contains a value
+/// whose toString() throws, causing the toEncodable callback to throw)
+/// but whose own [toString] returns a safe fallback string.
+class _PoisonMap implements Map<String, Object> {
+  final _inner = <String, Object>{'bad': _ThrowingToString()};
+
+  // -- Delegate core Map methods to _inner --
+  @override
+  Object? operator [](Object? key) => _inner[key];
+  @override
+  void operator []=(String key, Object value) => _inner[key] = value;
+  @override
+  void addAll(Map<String, Object> other) => _inner.addAll(other);
+  @override
+  void addEntries(Iterable<MapEntry<String, Object>> entries) =>
+      _inner.addEntries(entries);
+  @override
+  Map<RK, RV> cast<RK, RV>() => _inner.cast<RK, RV>();
+  @override
+  void clear() => _inner.clear();
+  @override
+  bool containsKey(Object? key) => _inner.containsKey(key);
+  @override
+  bool containsValue(Object? value) => _inner.containsValue(value);
+  @override
+  Iterable<MapEntry<String, Object>> get entries => _inner.entries;
+  @override
+  void forEach(void Function(String, Object) action) => _inner.forEach(action);
+  @override
+  bool get isEmpty => _inner.isEmpty;
+  @override
+  bool get isNotEmpty => _inner.isNotEmpty;
+  @override
+  Iterable<String> get keys => _inner.keys;
+  @override
+  int get length => _inner.length;
+  @override
+  Map<K2, V2> map<K2, V2>(MapEntry<K2, V2> Function(String, Object) convert) =>
+      _inner.map(convert);
+  @override
+  Object putIfAbsent(String key, Object Function() ifAbsent) =>
+      _inner.putIfAbsent(key, ifAbsent);
+  @override
+  Object? remove(Object? key) => _inner.remove(key);
+  @override
+  void removeWhere(bool Function(String, Object) test) =>
+      _inner.removeWhere(test);
+  @override
+  Object update(
+    String key,
+    Object Function(Object) update, {
+    Object Function()? ifAbsent,
+  }) => _inner.update(key, update, ifAbsent: ifAbsent);
+  @override
+  void updateAll(Object Function(String, Object) update) =>
+      _inner.updateAll(update);
+  @override
+  Iterable<Object> get values => _inner.values;
+
+  @override
+  String toString() => 'PoisonMap(fallback)';
 }
 
 /// Constructs a [ContentExtractor] with real (but default) collaborators.
@@ -65,11 +133,11 @@ void main() {
 
     test('level is preserved in result', () {
       final ext = _extractor();
-      final record = _record(message: 'warn', level: logging.Level.WARNING);
+      final record = _record(message: 'warn', level: LogLevel.warning);
 
       final result = ext.extract(record);
 
-      expect(result.level, equals(logging.Level.WARNING));
+      expect(result.level, equals(LogLevel.warning));
     });
 
     // ── LogMessage extraction ─────────────────────────────────────────────
@@ -150,8 +218,8 @@ void main() {
     });
 
     test('falls back to callerExtractor when LogMessage.method is null', () {
-      // Verifies no exception is thrown and the result is coherent.
-      // CallerExtractor may or may not find a frame in test context.
+      // CallerExtractor may or may not find a frame in test context,
+      // but the result must always contain the message section and be coherent.
       final ext = _extractor();
       final msg = LogMessage(
         'msg',
@@ -160,7 +228,25 @@ void main() {
       );
       final record = _record(object: msg);
 
-      expect(() => ext.extract(record), returnsNormally);
+      final result = ext.extract(record);
+
+      // The message section must always be present with the original text.
+      final msgSection = result.sections.firstWhere(
+        (s) => s.kind == SectionKind.message,
+      );
+      expect(msgSection.lines, equals(['msg']));
+
+      // className should be 'String' (from LogMessage.type).
+      expect(result.className, equals('String'));
+
+      // CallerExtractor may or may not resolve a methodName from the stack,
+      // but at least one of className or methodName must be non-null since
+      // we provided a valid Type and a real stack trace.
+      expect(
+        result.className != null || result.methodName != null,
+        isTrue,
+        reason: 'at least className or methodName should be resolved',
+      );
     });
 
     test('className and methodName are null for plain string records', () {
@@ -171,6 +257,27 @@ void main() {
 
       expect(result.className, isNull);
       expect(result.methodName, isNull);
+    });
+
+    // ── _formatData exception fallback ─────────────────────────────────────
+
+    test('_formatData does not crash when data throws on JSON encoding', () {
+      // _PoisonMap is a Map (so _formatData enters the JSON branch)
+      // containing a value whose toString() throws. The JSON encoder's
+      // toEncodable callback invokes toString() on that value, which throws,
+      // causing convert() to throw. The catch block then calls
+      // data.toString() on the _PoisonMap itself, which returns a safe string.
+      final ext = _extractor();
+
+      final poisonData = LogMessage('msg', String, data: _PoisonMap());
+      final record = _record(object: poisonData);
+
+      // Should not throw — the catch block in _formatData handles the failure.
+      final result = ext.extract(record);
+      final dataSection = result.sections.firstWhere(
+        (s) => s.kind == SectionKind.data,
+      );
+      expect(dataSection.lines, equals(['PoisonMap(fallback)']));
     });
 
     // ── Error / StackTrace sections ───────────────────────────────────────
