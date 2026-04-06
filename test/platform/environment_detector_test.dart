@@ -1,4 +1,4 @@
-import 'package:hyper_logger/hyper_logger.dart';
+import 'package:hyper_logger/src/platform/environment_detector.dart';
 import 'package:test/test.dart';
 
 void main() {

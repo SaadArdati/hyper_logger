@@ -1,162 +1,155 @@
-// ignore_for_file: avoid_print
+/// hyper_logger — quick start example.
+///
+/// Run: dart run example/example.dart
+library;
+
 import 'package:hyper_logger/hyper_logger.dart';
 
-/// Run: dart run example/demo.dart
-/// Or from repo root: dart run packages/hyper_logger/example/demo.dart
-void main() {
-  _section('AUTOMATIC PRESET (best-effort environment detection)');
-  print('  Detected environment: ${const EnvironmentDetector().detect().name}');
-  print('');
-  _demoPrinter(LogPrinterPresets.automatic());
+// ── Simple usage ─────────────────────────────────────────────────────────────
 
-  _section('TERMINAL PRESET (emoji + box + bg colors + prefix)');
-  _demo(LogPrinterPresets.terminal());
-
-  _section('IDE PRESET (emoji + prefix, no ANSI)');
-  _demo(LogPrinterPresets.ide());
-
-  _section('CI PRESET (timestamp + prefix, no formatting)');
-  _demo(LogPrinterPresets.ci());
-
-  _section('CLOUD RUN PRESET (JSON structured logging)');
-  _jsonDemo(LogPrinterPresets.cloudRun());
-
-  _section('CUSTOM: emoji + colors, no box');
-  _demo(
-    ComposablePrinter([
-      const EmojiDecorator(),
-      const AnsiColorDecorator(),
-      const PrefixDecorator(),
-    ]),
-  );
-
-  _section('CUSTOM: box + emoji, no colors');
-  _demo(
-    ComposablePrinter([
-      const BoxDecorator(lineLength: 80),
-      const EmojiDecorator(),
-      const PrefixDecorator(),
-    ]),
-  );
-
-  _section('CUSTOM: colors only, no emoji, no box');
-  _demo(
-    ComposablePrinter([const AnsiColorDecorator(), const PrefixDecorator()]),
-  );
-
-  _section('CUSTOM: everything + timestamp');
-  _demo(
-    ComposablePrinter([
-      const EmojiDecorator(),
-      const BoxDecorator(lineLength: 100),
-      const AnsiColorDecorator(),
-      const PrefixDecorator(),
-      const TimestampDecorator(),
-    ]),
-  );
-
-  _section('BARE: no decorators at all');
-  _demo(ComposablePrinter([]));
+/// The type parameter is always optional. Without it you still get the
+/// method name extracted from the stack trace.
+void simplestUsage() {
+  HyperLogger.info('Server started on port 8080');
+  HyperLogger.debug('Cache warmed', data: {'entries': 42});
 }
 
-void _section(String title) {
-  print('');
-  print('=' * 80);
-  print('  $title');
-  print('=' * 80);
-  print('');
+/// Add a type parameter to include the class name in the prefix.
+void withTypeParameter() {
+  HyperLogger.info<AuthService>('User logged in');
+  HyperLogger.warning<AuthService>('Token expires in 5 minutes');
+  HyperLogger.error<AuthService>(
+    'Login failed',
+    exception: Exception('Invalid credentials'),
+  );
 }
 
-void _demoPrinter(LogPrinter printer) {
-  if (printer is ComposablePrinter) {
-    _demo(printer);
-  } else if (printer is JsonPrinter) {
-    _jsonDemo(printer);
+// ── Scoped loggers ───────────────────────────────────────────────────────────
+
+/// Scoped loggers add tags, level filters, and runtime mode toggling.
+void scopedLoggerExample() {
+  final log = HyperLogger.withOptions<NoisyService>(
+    minLevel: LogLevel.warning,
+    tag: 'noisy',
+  );
+
+  log.info('This is filtered out'); // no-op (below minLevel)
+  log.warning('This gets through'); // only warnings and above
+
+  // Toggle at runtime (e.g. from a feature flag or debug menu)
+  log.mode = LogMode.disabled;
+  log.error('This is completely suppressed');
+}
+
+// ── Mixin ────────────────────────────────────────────────────────────────────
+
+/// Mix into any class for instance-method logging.
+class AuthService with HyperLoggerMixin<AuthService> {
+  void login(String user) {
+    logInfo('User $user logged in');
+    // Output: 💡 [AuthService.login] User alice logged in
+  }
+
+  void failedAttempt(String user) {
+    logWarning('Failed login attempt for $user');
   }
 }
 
-void _demo(ComposablePrinter printer) {
-  final levels = [
-    (LogLevel.debug, 'Debug message', 'MyService', 'fetchData'),
-    (LogLevel.info, 'User logged in successfully', 'AuthBloc', 'onLogin'),
-    (LogLevel.warning, 'Rate limit approaching', 'ApiClient', 'request'),
-    (LogLevel.error, 'Connection failed', 'WebSocket', 'connect'),
-  ];
-
-  for (final (level, msg, cls, method) in levels) {
-    final logMsg = LogMessage(msg, String, method: method);
-    final entry = LogEntry(
-      level: level,
-      message: msg,
-      object: logMsg,
-      loggerName: cls,
-      time: DateTime.now(),
-    );
-    final lines = printer.format(entry);
-    for (final line in lines) {
-      print(line);
-    }
-  }
-
-  // One with data
-  print('');
-  print('  -- with structured data --');
-  print('');
-  final withData = LogMessage(
-    'Fetched portfolio',
-    String,
-    method: 'load',
-    data: {'positions': 12, 'totalValue': 45230.50, 'currency': 'USD'},
+/// Override scopedLogger for per-class config.
+class PaymentService with HyperLoggerMixin<PaymentService> {
+  @override
+  final scopedLogger = HyperLogger.withOptions<PaymentService>(
+    tag: 'payments',
+    minLevel: LogLevel.info,
   );
-  final dataEntry = LogEntry(
-    level: LogLevel.info,
-    message: 'Fetched portfolio',
-    object: withData,
-    loggerName: 'Portfolio',
-    time: DateTime.now(),
-  );
-  for (final line in printer.format(dataEntry)) {
-    print(line);
-  }
 
-  // One with error + stack trace
-  print('');
-  print('  -- with error --');
-  print('');
-  final errorEntry = LogEntry(
-    level: LogLevel.error,
-    message: 'Failed to parse response',
-    object: LogMessage('Failed to parse response', String, method: 'parseJson'),
-    loggerName: 'ApiClient',
-    time: DateTime.now(),
-    error: FormatException('Unexpected character at position 42'),
+  void process(String orderId) {
+    logInfo('Processing order $orderId');
+    // Output: 💡 [PaymentService.process] [payments] Processing order ORD-001
+  }
+}
+
+// ── Structured data ──────────────────────────────────────────────────────────
+
+void structuredDataExample() {
+  HyperLogger.info<PortfolioService>(
+    'Positions loaded',
+    data: {'count': 12, 'totalValue': 45230.50, 'currency': 'USD'},
+  );
+
+  HyperLogger.error<ApiClient>(
+    'Request failed',
+    exception: Exception('Connection timeout after 5000ms'),
     stackTrace: StackTrace.current,
+    data: {'endpoint': '/api/v1/positions', 'retries': 3},
   );
-  for (final line in printer.format(errorEntry)) {
-    print(line);
+}
+
+// ── Custom printer ───────────────────────────────────────────────────────────
+
+/// Compose your own printer from decorators. Order doesn't matter.
+void customPrinterExample() {
+  HyperLogger.init(
+    printer: ComposablePrinter([
+      const EmojiDecorator(),
+      const AnsiColorDecorator(),
+      const BoxDecorator(lineLength: 100),
+      const TimestampDecorator(),
+      const PrefixDecorator(),
+    ]),
+  );
+
+  HyperLogger.info<CustomPrinterDemo>('Using a custom decorator stack');
+  HyperLogger.error<CustomPrinterDemo>('Errors get full box treatment');
+}
+
+// ── Rate limiting ────────────────────────────────────────────────────────────
+
+void throttledExample() {
+  HyperLogger.init(
+    printer: ThrottledPrinter(LogPrinterPresets.terminal(), maxPerSecond: 30),
+  );
+
+  // Hot loop — only 30 entries/sec reach the console, rest are queued.
+  for (var i = 0; i < 100; i++) {
+    HyperLogger.info<TickHandler>('Tick $i');
   }
 }
 
-void _jsonDemo(JsonPrinter printer) {
-  final levels = [
-    (LogLevel.debug, 'Debug message', 'MyService', 'fetchData'),
-    (LogLevel.info, 'User logged in successfully', 'AuthBloc', 'onLogin'),
-    (LogLevel.warning, 'Rate limit approaching', 'ApiClient', 'request'),
-    (LogLevel.error, 'Connection failed', 'WebSocket', 'connect'),
-  ];
+// ── Main ─────────────────────────────────────────────────────────────────────
 
-  for (final (level, msg, cls, method) in levels) {
-    final logMsg = LogMessage(msg, String, method: method);
-    final entry = LogEntry(
-      level: level,
-      message: msg,
-      object: logMsg,
-      loggerName: cls,
-      time: DateTime.now(),
-    );
-    final lines = printer.format(entry);
-    for (final line in lines) {
-      print(line);
-    }
-  }
+void main() {
+  // Zero config — just start logging.
+  simplestUsage();
+
+  withTypeParameter();
+
+  scopedLoggerExample();
+
+  final auth = AuthService();
+  auth.login('alice');
+  auth.failedAttempt('bob');
+
+  final payments = PaymentService();
+  payments.process('ORD-001');
+
+  structuredDataExample();
+
+  // Re-init with custom printer to show decorator composition.
+  customPrinterExample();
+
+  // Re-init with throttling to show rate limiting.
+  throttledExample();
 }
+
+// ── Dummy types for the examples ─────────────────────────────────────────────
+
+class NoisyService {}
+
+class PortfolioService {}
+
+class ApiClient {}
+
+class CustomPrinterDemo {}
+
+class TickHandler {}

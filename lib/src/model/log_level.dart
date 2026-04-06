@@ -66,9 +66,3 @@ enum LogLevel implements Comparable<LogLevel> {
   @override
   int compareTo(LogLevel other) => index.compareTo(other.index);
 }
-
-/// Convenience extension so internal code can write `level.toLogLevel`
-/// instead of `LogLevel.fromLoggingLevel(level)`.
-extension LoggingLevelExtension on logging.Level {
-  LogLevel get toLogLevel => LogLevel.fromLoggingLevel(this);
-}

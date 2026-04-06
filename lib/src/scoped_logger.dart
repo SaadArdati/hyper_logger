@@ -1,3 +1,4 @@
+import 'delegates/delegate_safety.dart';
 import 'hyper_logger_base.dart';
 import 'model/log_level.dart';
 import 'model/log_mode.dart';
@@ -54,14 +55,6 @@ class ScopedLogger<T> implements ScopedLoggerApi<T> {
 
   ScopedLogger({required this.options}) : mode = options.mode;
 
-  /// Fires a delegate call with error swallowing, matching the safety
-  /// guarantee of [HyperLogger._fireDelegate].
-  static void _fireDelegate(Future<void>? Function() fn) {
-    try {
-      fn()?.catchError((_) {});
-    } catch (_) {}
-  }
-
   /// Applies the [options.tag] prefix to [msg] when a tag is set.
   String _tagged(String msg) {
     final tag = options.tag;
@@ -100,7 +93,7 @@ class ScopedLogger<T> implements ScopedLoggerApi<T> {
   void warning(String msg, {Object? data, String? method}) {
     if (_suppressed(LogLevel.warning)) return;
     if (mode == LogMode.silent) {
-      _fireDelegate(() => HyperLogger.crashReporting?.log(_tagged(msg)));
+      fireDelegateSafely(() => HyperLogger.crashReporting?.log(_tagged(msg)));
       return;
     }
     HyperLogger.warning<T>(_tagged(msg), data: data, method: method);
@@ -120,7 +113,7 @@ class ScopedLogger<T> implements ScopedLoggerApi<T> {
     final skip = skipCrashReporting ?? options.skipCrashReporting;
     if (mode == LogMode.silent) {
       if (!skip) {
-        _fireDelegate(
+        fireDelegateSafely(
           () => HyperLogger.crashReporting?.recordError(
             exception ?? tagged,
             stackTrace,
@@ -151,7 +144,7 @@ class ScopedLogger<T> implements ScopedLoggerApi<T> {
     if (_suppressed(LogLevel.fatal)) return;
     final tagged = _tagged(message);
     if (mode == LogMode.silent) {
-      _fireDelegate(
+      fireDelegateSafely(
         () => HyperLogger.crashReporting?.recordError(
           exception ?? tagged,
           stackTrace,

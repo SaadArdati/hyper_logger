@@ -4,20 +4,33 @@ Composable, beautiful logging for Dart. Zero config. Every environment.
 
 ![hyper_logger output across environments](assets/preview_hero.png)
 
+## Start logging in one line
+
 ```dart
 import 'package:hyper_logger/hyper_logger.dart';
 
+HyperLogger.info('Server started on port 8080');
+```
+
+No init call. No setup. It auto-detects your environment and picks
+the right output format. The method name is extracted from the stack
+trace automatically.
+
+### Add a type parameter for richer output
+
+```dart
 HyperLogger.info<AuthService>('User logged in');
 HyperLogger.error<Database>('Query failed', exception: e, stackTrace: st);
 ```
 
-No init call. No setup. It auto-detects your environment, extracts the
-class and method name, and picks the right output format.
+The `<T>` type parameter adds the class name to the log prefix — turning
+`[main] Server started` into `[AuthService.login] User logged in`. It's
+always optional: omit it when you don't need it, add it when you do.
 
-## One line, every environment
+## Every environment, one API
 
-`HyperLogger.init(printer: LogPrinterPresets.automatic())` detects
-terminal, IDE, CI, and Cloud Run and selects the best format:
+`LogPrinterPresets.automatic()` detects terminal, IDE, CI, and Cloud Run
+and selects the best format:
 
 **Terminal** (emoji + box + ANSI colors)
 ![Terminal](assets/preview_terminal.png)
@@ -31,7 +44,11 @@ terminal, IDE, CI, and Cloud Run and selects the best format:
 **Cloud Run / JSON** (structured, Cloud Logging compatible)
 ![JSON](assets/preview_json.png)
 
-Or compose your own from decorators. Order doesn't matter:
+Works on native, web (via `WebConsolePrinter`), Flutter, and pure Dart.
+
+## Compose your own
+
+Decorators are order-independent — just pick what you want:
 
 ```dart
 ComposablePrinter([
@@ -45,25 +62,26 @@ ComposablePrinter([
 
 ![Custom colors](assets/preview_custom_colors.png)
 
-## Structured data and errors
+## Add logging to any class
 
-Pass `data:` for pretty-printed JSON. Errors and stack traces render
-in-box with level-appropriate colors:
+```dart
+class MyService with HyperLoggerMixin<MyService> {
+  void doWork() => logInfo('working');
+}
+```
 
-![Data and errors](assets/preview_data.png)
+That's it — `logInfo`, `logError`, `logDebug`, etc. are available
+immediately. The type parameter provides the class name in the prefix.
 
-Full error with data + exception + stack trace:
-
-![Full error](assets/preview_full.png)
-
-## The mixin
-
-Mix into any class. Override `scopedLogger` for per-class config:
+Want per-class config? Override `scopedLogger`:
 
 ```dart
 class PaymentService with HyperLoggerMixin<PaymentService> {
   @override
-  final scopedLogger = HyperLogger.withOptions<PaymentService>(tag: 'payments');
+  final scopedLogger = HyperLogger.withOptions<PaymentService>(
+    tag: 'payments',
+    minLevel: LogLevel.warning,
+  );
 
   void process() {
     logInfo('Processing payment');
@@ -71,6 +89,25 @@ class PaymentService with HyperLoggerMixin<PaymentService> {
   }
 }
 ```
+
+## Structured data and errors
+
+Pass `data:` for pretty-printed JSON. Errors and stack traces render
+in-box with level-appropriate colors:
+
+```dart
+HyperLogger.info<Portfolio>('Positions loaded', data: {
+  'count': 12,
+  'totalValue': 45230.50,
+  'currency': 'USD',
+});
+```
+
+![Data and errors](assets/preview_data.png)
+
+Full error with data + exception + stack trace:
+
+![Full error](assets/preview_full.png)
 
 ## Scoped loggers
 
@@ -99,13 +136,13 @@ HyperLogger.attachServices(
 );
 ```
 
-The delegate fires even in `LogMode.silent` (output suppressed, reporting active).
-See [example/crash_reporting_example.dart](example/crash_reporting_example.dart).
+The delegate fires even in `LogMode.silent` (output suppressed, reporting
+active). See [example/crash_reporting_example.dart](example/crash_reporting_example.dart).
 
 ## Rate limiting
 
 `ThrottledPrinter` wraps any printer to prevent hot loops from choking
-the process (20x speedup in benchmarks):
+the process:
 
 ```dart
 HyperLogger.init(
@@ -117,14 +154,14 @@ HyperLogger.init(
 
 ```yaml
 dependencies:
-  hyper_logger: ^0.0.1
+  hyper_logger: ^0.1.0
 ```
 
 ## Documentation
 
 | Guide | |
 |---|---|
-| [Flutter integration](doc/flutter.md) | Firebase Crashlytics/Analytics, error zones, `debugPrint`, build modes |
+| [Flutter integration](doc/flutter.md) | Firebase Crashlytics, error zones, `debugPrint`, build modes |
 | [Configuration](doc/configuration.md) | `init()` params, log levels, filtering, ANSI colors |
 | [Custom printers](doc/custom_printers.md) | `LogPrinter` interface, decorators, `ThrottledPrinter` |
 | [Scoped loggers](doc/scoped_loggers.md) | `LoggerOptions`, caching, mode toggling |
@@ -133,8 +170,8 @@ dependencies:
 | [Testing](doc/testing.md) | Suppressing output, capturing logs, mocking |
 | [Architecture](doc/architecture.md) | Pipeline design, `LogEntry`, internals |
 
-Examples: [all presets](example/example.dart) | [mixin](example/mixin_example.dart) | [crash reporting](example/crash_reporting_example.dart) | [file logging](example/file_logger_example.dart) | [buffered remote](example/buffered_remote_logger_example.dart)
+Examples: [quick start](example/example.dart) | [all presets](example/preset_showcase_example.dart) | [mixin](example/mixin_example.dart) | [crash reporting](example/crash_reporting_example.dart) | [file logging](example/file_logger_example.dart) | [buffered remote](example/buffered_remote_logger_example.dart)
 
 ## License
 
-See the repository root for license details.
+BSD 3-Clause — see [LICENSE](LICENSE).

@@ -1,4 +1,6 @@
 import 'package:hyper_logger/hyper_logger.dart';
+import 'package:hyper_logger/src/model/log_section.dart';
+import 'package:hyper_logger/src/rendering/style_resolver.dart';
 import 'package:test/test.dart';
 
 // ---------------------------------------------------------------------------

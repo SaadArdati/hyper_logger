@@ -1,4 +1,10 @@
 import 'package:hyper_logger/hyper_logger.dart';
+import 'package:hyper_logger/src/extraction/content_extractor.dart';
+import 'package:hyper_logger/src/model/log_section.dart';
+import 'package:hyper_logger/src/model/resolved_style.dart';
+import 'package:hyper_logger/src/rendering/log_renderer.dart';
+import 'package:hyper_logger/src/rendering/section_renderer.dart';
+import 'package:hyper_logger/src/rendering/style_resolver.dart';
 import 'package:test/test.dart';
 
 // ── Test doubles ───────────────────────────────────────────────────────────────

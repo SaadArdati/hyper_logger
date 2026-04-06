@@ -1,6 +1,6 @@
 name: hyper_logger
-description: Composable logging package with order-independent decorators and CSS-cascade-style resolution.
-version: 0.0.1
+description: Beautiful, composable logging for Dart with automatic environment detection, scoped loggers, and crash reporting.
+version: 0.1.0
 repository: https://github.com/SaadArdati/hyper_logger
 topics:
   - logging
@@ -9,7 +9,7 @@ topics:
   - diagnostics
 
 environment:
-  sdk: ^3.10.0
+  sdk: ^3.8.0
 
 dependencies:
   logging: ^1.3.0

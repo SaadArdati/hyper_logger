@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:logging/logging.dart' as logging;
 
 import 'delegates/crash_reporting_delegate.dart';
+import 'delegates/delegate_safety.dart';
 import 'scoped_logger.dart';
 import 'lru_cache.dart';
 import 'model/log_entry.dart';
@@ -238,7 +239,7 @@ class HyperLogger {
     if (_mode == LogMode.disabled) return;
     _ensureInitialized();
     // Delegates fire in silent mode.
-    _fireDelegate(() => _crashReporting?.log(message));
+    fireDelegateSafely(() => _crashReporting?.log(message));
     if (_mode == LogMode.silent) return;
     _log<T>(logging.Level.WARNING, message, data: data, method: method);
   }
@@ -271,7 +272,7 @@ class HyperLogger {
     _ensureInitialized();
     // Delegates fire in silent mode.
     if (!skipCrashReporting) {
-      _fireDelegate(
+      fireDelegateSafely(
         () => _crashReporting?.recordError(
           exception ?? message,
           stackTrace,
@@ -315,7 +316,7 @@ class HyperLogger {
     if (_mode == LogMode.disabled) return;
     _ensureInitialized();
     // Delegates fire in silent mode.
-    _fireDelegate(
+    fireDelegateSafely(
       () => _crashReporting?.recordError(
         exception ?? message,
         stackTrace,
@@ -444,17 +445,6 @@ class HyperLogger {
     // Pass logMessage as the message parameter (Object?). The logging package
     // will set record.object = logMessage and record.message = logMessage.toString().
     logger.log(level, logMessage, error, stackTrace);
-  }
-
-  /// Fires a delegate call, catching and swallowing any error so that
-  /// logging never crashes the app. The returned [Future] (if any) is
-  /// awaited with an error handler that also swallows.
-  static void _fireDelegate(Future<void>? Function() fn) {
-    try {
-      fn()?.catchError((_) {});
-    } catch (_) {
-      // Synchronous throw from the delegate — swallow.
-    }
   }
 
   /// Listener wired to [logging.Logger.root.onRecord].

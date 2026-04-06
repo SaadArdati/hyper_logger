@@ -2,6 +2,9 @@ import 'dart:convert';
 
 import 'package:hyper_logger/hyper_logger.dart';
 import 'package:hyper_logger/src/extraction/caller_extractor.dart';
+import 'package:hyper_logger/src/extraction/content_extractor.dart';
+import 'package:hyper_logger/src/extraction/stack_trace_parser.dart';
+import 'package:hyper_logger/src/model/log_section.dart';
 import 'package:test/test.dart';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

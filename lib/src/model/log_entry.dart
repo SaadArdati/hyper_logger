@@ -43,7 +43,7 @@ class LogEntry {
 
   /// Creates a [LogEntry] from a [logging.LogRecord].
   factory LogEntry.fromLogRecord(logging.LogRecord record) => LogEntry(
-    level: record.level.toLogLevel,
+    level: LogLevel.fromLoggingLevel(record.level),
     message: record.message,
     object: record.object,
     loggerName: record.loggerName,

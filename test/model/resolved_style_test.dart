@@ -1,4 +1,5 @@
 import 'package:hyper_logger/hyper_logger.dart';
+import 'package:hyper_logger/src/model/resolved_style.dart';
 import 'package:test/test.dart';
 
 // Helpers to build expected ANSI sequences without depending on AnsiColor

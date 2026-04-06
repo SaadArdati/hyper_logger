@@ -30,11 +30,11 @@ extension LogPrinterPresets on LogPrinter {
   static LogPrinter automatic({LogOutput? output}) {
     final env = const EnvironmentDetector().detect();
     return switch (env) {
-      .cloudRun => cloudRun(output: output),
-      .ci => ci(output: output),
-      .ide => ide(output: output),
-      .terminal => terminal(output: output),
-      .plain => _plain(output: output),
+      RuntimeEnvironment.cloudRun => cloudRun(output: output),
+      RuntimeEnvironment.ci => ci(output: output),
+      RuntimeEnvironment.ide => ide(output: output),
+      RuntimeEnvironment.terminal => terminal(output: output),
+      RuntimeEnvironment.plain => _plain(output: output),
     };
   }
 

@@ -196,50 +196,49 @@ void main() {
     });
   });
 
-  // ── LoggingLevelExtension ─────────────────────────────────────────────────
+  // ── fromLoggingLevel static method ──────────────────────────────────────
 
-  group('LoggingLevelExtension.toLogLevel', () {
-    test('FINEST.toLogLevel returns trace', () {
-      expect(logging.Level.FINEST.toLogLevel, equals(LogLevel.trace));
+  group('LogLevel.fromLoggingLevel', () {
+    test('FINEST returns trace', () {
+      expect(
+        LogLevel.fromLoggingLevel(logging.Level.FINEST),
+        equals(LogLevel.trace),
+      );
     });
 
-    test('FINE.toLogLevel returns debug', () {
-      expect(logging.Level.FINE.toLogLevel, equals(LogLevel.debug));
+    test('FINE returns debug', () {
+      expect(
+        LogLevel.fromLoggingLevel(logging.Level.FINE),
+        equals(LogLevel.debug),
+      );
     });
 
-    test('INFO.toLogLevel returns info', () {
-      expect(logging.Level.INFO.toLogLevel, equals(LogLevel.info));
+    test('INFO returns info', () {
+      expect(
+        LogLevel.fromLoggingLevel(logging.Level.INFO),
+        equals(LogLevel.info),
+      );
     });
 
-    test('WARNING.toLogLevel returns warning', () {
-      expect(logging.Level.WARNING.toLogLevel, equals(LogLevel.warning));
+    test('WARNING returns warning', () {
+      expect(
+        LogLevel.fromLoggingLevel(logging.Level.WARNING),
+        equals(LogLevel.warning),
+      );
     });
 
-    test('SEVERE.toLogLevel returns error', () {
-      expect(logging.Level.SEVERE.toLogLevel, equals(LogLevel.error));
+    test('SEVERE returns error', () {
+      expect(
+        LogLevel.fromLoggingLevel(logging.Level.SEVERE),
+        equals(LogLevel.error),
+      );
     });
 
-    test('SHOUT.toLogLevel returns fatal', () {
-      expect(logging.Level.SHOUT.toLogLevel, equals(LogLevel.fatal));
-    });
-
-    test('extension produces same result as static method', () {
-      for (final loggingLevel in [
-        logging.Level.FINEST,
-        logging.Level.FINER,
-        logging.Level.FINE,
-        logging.Level.CONFIG,
-        logging.Level.INFO,
-        logging.Level.WARNING,
-        logging.Level.SEVERE,
-        logging.Level.SHOUT,
-      ]) {
-        expect(
-          loggingLevel.toLogLevel,
-          equals(LogLevel.fromLoggingLevel(loggingLevel)),
-          reason: '${loggingLevel.name}: extension and static should agree',
-        );
-      }
+    test('SHOUT returns fatal', () {
+      expect(
+        LogLevel.fromLoggingLevel(logging.Level.SHOUT),
+        equals(LogLevel.fatal),
+      );
     });
   });
 
