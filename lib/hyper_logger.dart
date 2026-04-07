@@ -30,3 +30,8 @@ export 'src/printer/presets.dart';
 export 'src/printer/direct_printer.dart';
 export 'src/printer/json_printer.dart';
 export 'src/printer/throttled_printer.dart';
+
+// WebConsolePrinter is not exported from the barrel because it depends
+// on dart:js_interop (web-only). It is auto-selected on web platforms
+// via printer_factory_web.dart. Import directly from
+// 'package:hyper_logger/src/printer/web_console_printer.dart' if needed.

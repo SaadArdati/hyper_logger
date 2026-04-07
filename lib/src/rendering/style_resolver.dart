@@ -20,7 +20,11 @@ class StyleResolver {
   // Default level → background-color mappings (muted backgrounds)
   // --------------------------------------------------------------------------
 
-  static final Map<LogLevel, AnsiColor> _defaultLevelColors = {
+  /// Default level → background-color mappings.
+  ///
+  /// Used by the terminal preset for box backgrounds and by the
+  /// [WebConsolePrinter] for CSS badge colors.
+  static final Map<LogLevel, AnsiColor> defaultLevelColors = {
     LogLevel.trace: AnsiColor.fromRGB(30, 30, 30),
     LogLevel.debug: AnsiColor.fromRGB(50, 0, 45),
     LogLevel.info: AnsiColor.fromRGB(0, 23, 59),
@@ -161,7 +165,7 @@ class StyleResolver {
 
   AnsiColor _levelBg(LogStyle style, LogLevel level) {
     return style.levelColors?[level] ??
-        _defaultLevelColors[level] ??
+        defaultLevelColors[level] ??
         AnsiColor.fromRGB(60, 60, 60);
   }
 }

@@ -56,9 +56,10 @@ caller extraction) happens here and only here.
 
 ### Fire-and-forget delegate with error boundary
 
-Delegate calls (`CrashReportingDelegate`) are wrapped in `_fireDelegate`,
-which catches both synchronous throws and async Future rejections. Logging
-never crashes the app, even if your Crashlytics SDK throws.
+Delegate calls (`CrashReportingDelegate`) are wrapped in `fireDelegateSafely`
+(in `delegates/delegate_safety.dart`), which catches both synchronous throws
+and async Future rejections. Logging never crashes the app, even if your
+Crashlytics SDK throws.
 
 ### Release-mode type name suppression
 

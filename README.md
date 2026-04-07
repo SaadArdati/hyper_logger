@@ -44,7 +44,10 @@ and selects the best format:
 **Cloud Run / JSON** (structured, Cloud Logging compatible)
 ![JSON](assets/preview_json.png)
 
-Works on native, web (via `WebConsolePrinter`), Flutter, and pure Dart.
+**Web** (DevTools groups with `%c` CSS styling, `console.dir` for data)
+![Web Console](assets/preview_web_console.png)
+
+Works on native, web, Flutter, and pure Dart.
 
 ## Compose your own
 

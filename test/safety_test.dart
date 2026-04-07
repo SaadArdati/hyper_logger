@@ -118,7 +118,7 @@ void main() {
       // happen in the log methods, before _log publishes to the logging
       // package. So delegates should have been called already.
       // However, in enabled mode, the flow is:
-      // 1. warning() calls _fireDelegate(crashReporting.log)
+      // 1. warning() calls fireDelegateSafely(crashReporting.log)
       // 2. warning() calls _log() which publishes a LogRecord
       // 3. _handleLogRecord receives it and calls printer.log() which throws
       // So delegate fires BEFORE the printer.
@@ -159,7 +159,7 @@ void main() {
   // ── Delegate that throws synchronously ────────────────────────────────────
 
   group('delegate that throws synchronously', () {
-    test('crash reporting log() throw is swallowed by _fireDelegate', () {
+    test('crash reporting log() throw is swallowed by fireDelegateSafely', () {
       HyperLogger.init(printer: DirectPrinter(output: (_) {}));
       final crash = _SyncThrowingCrashReporting();
       HyperLogger.attachServices(crashReporting: crash);
@@ -169,7 +169,7 @@ void main() {
     });
 
     test(
-      'crash reporting recordError() throw is swallowed by _fireDelegate on error',
+      'crash reporting recordError() throw is swallowed by fireDelegateSafely on error',
       () {
         HyperLogger.init(printer: DirectPrinter(output: (_) {}));
         final crash = _SyncThrowingCrashReporting();
@@ -184,7 +184,7 @@ void main() {
     );
 
     test(
-      'crash reporting recordError() throw is swallowed by _fireDelegate on fatal',
+      'crash reporting recordError() throw is swallowed by fireDelegateSafely on fatal',
       () {
         HyperLogger.init(printer: DirectPrinter(output: (_) {}));
         final crash = _SyncThrowingCrashReporting();
@@ -207,7 +207,7 @@ void main() {
       final crash = _AsyncThrowingCrashReporting();
       HyperLogger.attachServices(crashReporting: crash);
 
-      // The _fireDelegate wraps with catchError, so the rejected future
+      // The fireDelegateSafely wraps with catchError, so the rejected future
       // should not surface as an unhandled exception.
       expect(
         () => HyperLogger.warning<String>('async reject'),
