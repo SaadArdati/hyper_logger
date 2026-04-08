@@ -12,5 +12,5 @@
 - `ScopedLogger` with `LoggerOptions` for per-module configuration.
 - Crash reporting delegate support (`CrashReportingDelegate`).
 - `LogMode` enum (`enabled`, `silent`, `disabled`) at both global and per-scope levels.
-- Auto-initialization with platform defaults — zero config required.
+- Auto-initialization with platform defaults. Zero config required.
 - Trimmed public API surface: pipeline internals no longer exported from barrel.

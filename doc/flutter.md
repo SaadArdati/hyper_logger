@@ -1,11 +1,9 @@
-# Flutter Integration
+# Flutter integration
 
-A production-ready guide for using hyper_logger in Flutter apps, covering
-error handling, Firebase delegates, zone interception, build modes, and
-`debugPrint` integration.
+This guide covers using hyper_logger in a Flutter app: error handling,
+build modes, `debugPrint` integration, and zone interception.
 
-See [example/crash_reporting_example.dart](../example/crash_reporting_example.dart)
-for a quick runnable demo of delegate wiring.
+For Firebase Crashlytics setup, see [Firebase integration](firebase.md).
 
 ## Basic setup
 
@@ -17,7 +15,7 @@ import 'package:hyper_logger/hyper_logger.dart';
 void main() {
   HyperLogger.init(
     printer: LogPrinterPresets.automatic(
-      output: (s) => debugPrint(s), // Android throttling
+      output: (s) => debugPrint(s),
     ),
     mode: kReleaseMode ? LogMode.silent : LogMode.enabled,
   );
@@ -26,13 +24,46 @@ void main() {
 }
 ```
 
-Using `debugPrint` as the output sink prevents Android from dropping log
-lines when output is fast. Setting `LogMode.silent` in release mode
-suppresses console output while keeping crash reporting active.
+Two things worth noting here:
+
+**`debugPrint` as the output sink.** On Android, the system logger
+(`logcat`) has a line-rate limit. If your app logs quickly, lines get
+silently dropped. Flutter's `debugPrint` throttles output to stay within
+that limit. Passing it as the `output` callback prevents log loss.
+
+This is different from `ThrottledPrinter`. `debugPrint` throttles the
+*delivery* of lines to the platform logger so Android doesn't drop them.
+`ThrottledPrinter` throttles the *number of log entries* that reach the
+printer at all, dropping excess entries when your code logs too fast. In
+a Flutter app, you might use both: `ThrottledPrinter` to cap how many
+entries are processed per second, and `debugPrint` as the output sink to
+make sure the ones that do get through aren't lost by Android. See
+[Custom printers: ThrottledPrinter](custom_printers.md#throttledprinter).
+
+**`LogMode.silent` in release mode.** Your users don't see the console,
+so printing there wastes resources. But `silent` still forwards warnings
+and errors to your crash reporting delegate. See
+[Configuration: Log modes](configuration.md#log-modes) for the full
+explanation.
 
 ## Catching all errors
 
-Flutter has two error surfaces. You need both:
+Flutter has two separate error surfaces:
+
+1. **Synchronous Flutter framework errors**: widget build failures,
+   layout exceptions, painting errors. These go through
+   `FlutterError.onError`. By default, Flutter renders these as the
+   red error screen in debug mode (the "RenderFlex overflowed" screen
+   you've probably seen) and silently logs them in release mode.
+2. **Asynchronous errors**: uncaught exceptions in Futures, event
+   handlers, isolate callbacks. These go through
+   `PlatformDispatcher.instance.onError`.
+
+You may want to override one or both of these, depending on your needs.
+If you're happy with Flutter's default error rendering for framework
+errors and just want async coverage, skip `FlutterError.onError`. If
+you want all errors funneled through hyper_logger for consistent
+formatting and crash reporting, override both:
 
 ```dart
 void main() {
@@ -45,21 +76,13 @@ void main() {
     mode: kReleaseMode ? LogMode.silent : LogMode.enabled,
   );
 
-  // 1. Synchronous Flutter framework errors (widget build, layout, painting)
+  // 1. Synchronous Flutter framework errors
   FlutterError.onError = (details) {
     HyperLogger.error<FlutterError>(
       details.exceptionAsString(),
       exception: details.exception,
       stackTrace: details.stack,
-      // Avoid double-reporting: we forward manually below
-      skipCrashReporting: true,
     );
-    // Forward to Crashlytics directly for Flutter-specific metadata
-    if (!kDebugMode) {
-      HyperLogger.crashReporting
-          ?.recordError(details.exception, details.stack, reason: details.context?.toString())
-          .ignore();
-    }
   };
 
   // 2. Async errors (uncaught exceptions in futures, event handlers)
@@ -76,81 +99,11 @@ void main() {
 }
 ```
 
-`skipCrashReporting: true` on `FlutterError.onError` prevents
-double-reporting. The `error()` call would fire the delegate, AND the
-manual `recordError` would fire again. Use one or the other.
+## Suppressing `print()` in production
 
-## Firebase Crashlytics delegate
-
-```dart
-import 'package:firebase_crashlytics/firebase_crashlytics.dart';
-import 'package:hyper_logger/hyper_logger.dart';
-
-class CrashlyticsCrashReporting extends CrashReportingDelegate {
-  final FirebaseCrashlytics _crashlytics = FirebaseCrashlytics.instance;
-
-  @override
-  Future<void> log(String message) {
-    return _crashlytics.log(message);
-  }
-
-  @override
-  Future<void> recordError(
-    Object error,
-    StackTrace? stackTrace, {
-    bool fatal = false,
-    String? reason,
-  }) {
-    return _crashlytics.recordError(
-      error,
-      stackTrace,
-      fatal: fatal,
-      reason: reason,
-    );
-  }
-}
-```
-
-## Attaching the delegate after Firebase init
-
-Delegates should be attached after Firebase is initialized, not before:
-
-```dart
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-
-  // 1. Init logger early (console output works immediately)
-  HyperLogger.init(
-    printer: LogPrinterPresets.automatic(
-      output: (s) => debugPrint(s),
-    ),
-    mode: kReleaseMode ? LogMode.silent : LogMode.enabled,
-  );
-
-  // 2. Init Firebase
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-
-  // 3. Attach delegate (now Firebase is ready)
-  HyperLogger.attachServices(
-    crashReporting: CrashlyticsCrashReporting(),
-  );
-
-  // 4. Set up error handlers (after delegates are attached)
-  FlutterError.onError = (details) { /* ... */ };
-  PlatformDispatcher.instance.onError = (error, stack) { /* ... */ };
-
-  runApp(const MyApp());
-}
-```
-
-Logs between steps 1 and 3 go to the console but not to the delegate (it
-isn't attached yet). This is fine; initialization logs rarely need crash
-reporting.
-
-## Suppressing print() in production
-
-Use `runZoned` with a `ZoneSpecification` to intercept all `print()`
-calls, including from third-party packages:
+Third-party packages in your dependency graph might use raw `print()`
+calls. In production, these are noise. Use `runZoned` with a
+`ZoneSpecification` to intercept all `print()` calls:
 
 ```dart
 void main() {
@@ -173,162 +126,49 @@ void main() {
 }
 ```
 
-This catches `print()` calls from every package in your dependency graph,
-not just your own code.
+This catches `print()` calls from every package in your dependency
+graph, not just your own code.
 
-## Platform-aware delegates
-
-Firebase Crashlytics is not available on all platforms. Use conditional
-construction:
-
-```dart
-import 'dart:io' show Platform;
-
-CrashReportingDelegate? createCrashReporting() {
-  if (Platform.isIOS || Platform.isAndroid || Platform.isMacOS) {
-    return CrashlyticsCrashReporting();
-  }
-  return null; // No crash reporting on web/linux/windows
-}
-```
-
-On web, use conditional imports:
+Alternatively, instead of dropping them, you can funnel stray `print()`
+calls through hyper_logger so they get the same formatting, filtering,
+and crash reporting as the rest of your logs:
 
 ```dart
-// crash_reporting_factory.dart
-export 'crash_reporting_factory_native.dart'
-    if (dart.library.js_interop) 'crash_reporting_factory_web.dart';
+zoneSpecification: ZoneSpecification(
+  print: (self, parent, zone, message) {
+    HyperLogger.debug<Zone>(message);
+  },
+),
 ```
+
+This way nothing is silently lost. Third-party `print()` calls show up
+as debug-level entries in your log output, and you can filter them with
+`logFilter` or `minLevel` if they're noisy.
 
 ## Build mode configuration
 
 | Mode | Recommended `LogMode` | Delegates | Console |
 |---|---|---|---|
-| Debug | `enabled` | Optional | Full output |
+| Debug | `enabled` | No | Full output |
 | Profile | `enabled` | Yes | Full output |
 | Release | `silent` | Yes | Suppressed |
 
 ```dart
 HyperLogger.init(
   mode: kReleaseMode ? LogMode.silent : LogMode.enabled,
-  captureStackTrace: !kReleaseMode, // Skip the ~700ns overhead in release
+  captureStackTrace: !kReleaseMode,
 );
 ```
 
-In release mode with `LogMode.silent`:
-- Console output is suppressed (no noise in logcat)
-- Crash reporting delegate still fires (errors reach Crashlytics)
+In release mode with `LogMode.silent`: console output is suppressed (no
+noise in logcat), but the crash reporting delegate still fires (errors
+reach your crash reporting service).
 
-## User identification
-
-Sync user ID with crash reporting when auth state changes:
-
-```dart
-// When user logs in:
-FirebaseCrashlytics.instance.setUserIdentifier(user.id);
-FirebaseAnalytics.instance.setUserId(id: user.id);
-
-// When user logs out:
-FirebaseCrashlytics.instance.setUserIdentifier('');
-FirebaseAnalytics.instance.setUserId(id: null);
-```
-
-This isn't part of hyper_logger itself, but it's critical for useful
-crash reports.
-
-## Bridging third-party package loggers
-
-Third-party packages with their own logging interfaces can be bridged to
-hyper_logger:
-
-```dart
-class ThirdPartyLogBridge implements ThirdPartyLogDelegate {
-  @override
-  void debug(String message, {Object? data}) {
-    HyperLogger.debug<ThirdPartyLogBridge>(message, data: data);
-  }
-
-  @override
-  void error(String message, {Object? error, StackTrace? stackTrace}) {
-    HyperLogger.error<ThirdPartyLogBridge>(
-      message,
-      exception: error,
-      stackTrace: stackTrace,
-    );
-  }
-}
-
-// In your DI setup:
-thirdPartyService.setLogger(ThirdPartyLogBridge());
-```
-
-This funnels all third-party logs through hyper_logger, giving you
-consistent formatting, level filtering, and crash reporting.
-
-## Complete production main.dart
-
-Putting it all together:
-
-```dart
-import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
-import 'package:hyper_logger/hyper_logger.dart';
-
-void main() {
-  runZoned(
-    () async {
-      WidgetsFlutterBinding.ensureInitialized();
-
-      // Logger: console output immediately
-      HyperLogger.init(
-        printer: LogPrinterPresets.automatic(
-          output: (s) => debugPrint(s),
-        ),
-        mode: kReleaseMode ? LogMode.silent : LogMode.enabled,
-        captureStackTrace: !kReleaseMode,
-      );
-
-      // Firebase
-      await Firebase.initializeApp();
-
-      // Delegate: attached after Firebase is ready
-      HyperLogger.attachServices(
-        crashReporting: CrashlyticsCrashReporting(),
-      );
-
-      // Error handlers
-      FlutterError.onError = (details) {
-        HyperLogger.error<FlutterError>(
-          details.exceptionAsString(),
-          exception: details.exception,
-          stackTrace: details.stack,
-          skipCrashReporting: true,
-        );
-        if (!kDebugMode) {
-          FirebaseCrashlytics.instance
-              .recordFlutterFatalError(details);
-        }
-      };
-
-      PlatformDispatcher.instance.onError = (error, stack) {
-        HyperLogger.error<PlatformDispatcher>(
-          'Unhandled async error',
-          exception: error,
-          stackTrace: stack,
-        );
-        return true;
-      };
-
-      runApp(const MyApp());
-    },
-    zoneSpecification: ZoneSpecification(
-      print: (self, parent, zone, message) {
-        if (!kReleaseMode) {
-          parent.print(zone, message);
-        }
-      },
-    ),
-  );
-}
-```
+Disabling `captureStackTrace` in release is recommended for two reasons.
+First, it saves the ~700ns overhead per log call. Second, in release
+builds, Dart obfuscates and minifies stack traces, so the frames
+hyper_logger captures are unreadable anyway. `T.toString()` also returns
+minified class names in `dart2js` builds, so type prefixes like
+`[AuthService.login]` become garbled. Your crash reporting service
+handles symbolication on its own using your app's debug symbols. Let it
+do that job instead.

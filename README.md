@@ -23,7 +23,7 @@ HyperLogger.info<AuthService>('User logged in');
 HyperLogger.error<Database>('Query failed', exception: e, stackTrace: st);
 ```
 
-The `<T>` type parameter adds the class name to the log prefix — turning
+The `<T>` type parameter adds the class name to the log prefix, turning
 `[main] Server started` into `[AuthService.login] User logged in`. It's
 always optional: omit it when you don't need it, add it when you do.
 
@@ -51,14 +51,13 @@ Works on native, web, Flutter, and pure Dart.
 
 ## Compose your own
 
-Decorators are order-independent — just pick what you want:
+Decorators are order-independent. Just pick what you want:
 
 ```dart
 ComposablePrinter([
   const EmojiDecorator(),
   const AnsiColorDecorator(),
   const BoxDecorator(lineLength: 100),
-  const TimestampDecorator(),
   const PrefixDecorator(),
 ]);
 ```
@@ -73,7 +72,7 @@ class MyService with HyperLoggerMixin<MyService> {
 }
 ```
 
-That's it — `logInfo`, `logError`, `logDebug`, etc. are available
+That's it. `logInfo`, `logError`, `logDebug`, etc. are available
 immediately. The type parameter provides the class name in the prefix.
 
 Want per-class config? Override `scopedLogger`:
@@ -144,8 +143,9 @@ active). See [example/crash_reporting_example.dart](example/crash_reporting_exam
 
 ## Rate limiting
 
-`ThrottledPrinter` wraps any printer to prevent hot loops from choking
-the process:
+Put a log line in a `build()` method that triggers hundreds of times per
+second, and your Dart process will freeze while the console tries to
+catch up. `ThrottledPrinter` prevents this by rate-limiting any printer:
 
 ```dart
 HyperLogger.init(
@@ -164,17 +164,18 @@ dependencies:
 
 | Guide | |
 |---|---|
-| [Flutter integration](doc/flutter.md) | Firebase Crashlytics, error zones, `debugPrint`, build modes |
-| [Configuration](doc/configuration.md) | `init()` params, log levels, filtering, ANSI colors |
-| [Custom printers](doc/custom_printers.md) | `LogPrinter` interface, decorators, `ThrottledPrinter` |
-| [Scoped loggers](doc/scoped_loggers.md) | `LoggerOptions`, caching, mode toggling |
-| [HyperLoggerMixin](doc/mixin.md) | Mixin usage, scoped injection, testing |
-| [Delegates](doc/delegates.md) | Crash reporting, error safety |
-| [Testing](doc/testing.md) | Suppressing output, capturing logs, mocking |
-| [Architecture](doc/architecture.md) | Pipeline design, `LogEntry`, internals |
+| [Configuration](doc/configuration.md) | Log levels, log modes, printer presets, filtering, ANSI colors |
+| [Custom printers](doc/custom_printers.md) | Printer interface, decorators, `ThrottledPrinter`, custom sinks |
+| [Scoped loggers](doc/scoped_loggers.md) | Tags, level filters, mode toggling, caching |
+| [HyperLoggerMixin](doc/mixin.md) | Mixin usage, delegation chain, scoped injection |
+| [Delegates](doc/delegates.md) | Crash reporting, error safety, mode interaction |
+| [Testing](doc/testing.md) | Suppressing output, capturing logs, mocking, test patterns |
+| [Flutter integration](doc/flutter.md) | Error handling, `debugPrint`, build modes |
+| [Firebase Crashlytics](doc/firebase.md) | Crashlytics delegate, init ordering, production main.dart |
+| [Architecture](doc/architecture.md) | Pipeline design, internals, performance |
 
 Examples: [quick start](example/example.dart) | [all presets](example/preset_showcase_example.dart) | [mixin](example/mixin_example.dart) | [crash reporting](example/crash_reporting_example.dart) | [file logging](example/file_logger_example.dart) | [buffered remote](example/buffered_remote_logger_example.dart)
 
 ## License
 
-BSD 3-Clause — see [LICENSE](LICENSE).
+BSD 3-Clause. See [LICENSE](LICENSE).

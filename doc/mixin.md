@@ -1,7 +1,11 @@
 # HyperLoggerMixin
 
-A convenience mixin that gives any class instance-level logging methods
-with automatic type parameter forwarding.
+If a class logs frequently, typing `HyperLogger.info<MyClass>(...)` on
+every call gets repetitive. The `<MyClass>` type parameter is always the
+same within that class, so you're repeating yourself for no reason.
+
+`HyperLoggerMixin<T>` gives any class instance-level logging methods
+that forward the type parameter automatically.
 
 ## Basic usage
 
@@ -9,17 +13,21 @@ with automatic type parameter forwarding.
 class AuthService with HyperLoggerMixin<AuthService> {
   void login(String email) {
     logInfo('Login attempt', data: {'email': email});
-    // Output: 💡 [AuthService.login] Login attempt
   }
 }
 ```
 
+![Mixin output](../assets/preview_doc_mixin.png)
+
 Without any configuration, the mixin delegates to `HyperLogger` static
-methods, forwarding the `<T>` type parameter automatically.
+methods, forwarding `<T>` for you. All global settings (mode, filters,
+printer, delegates) apply exactly as they would with a direct
+`HyperLogger.info<AuthService>(...)` call.
 
 ## With a scoped logger
 
-Override `scopedLogger` to use scoped options (tags, level filters, mode):
+Override `scopedLogger` to use per-class tags, level filters, or mode
+control:
 
 ```dart
 class PaymentService with HyperLoggerMixin<PaymentService> {
@@ -34,7 +42,7 @@ class PaymentService with HyperLoggerMixin<PaymentService> {
     // Output: 💡 [PaymentService.process] [payments] Processing payment
 
     logDebug('Connecting to gateway');
-    // Suppressed — debug < info (minLevel)
+    // Nothing. debug is below info.
   }
 }
 ```
@@ -43,8 +51,34 @@ When `scopedLogger` is provided, all `logX` methods delegate to it
 instead of the global `HyperLogger`. This gives you per-class tags,
 level filtering, mode control, and `skipCrashReporting` defaults.
 
-See [example/mixin_example.dart](../example/mixin_example.dart) for a
-full runnable example.
+See [Scoped loggers](scoped_loggers.md) for full details on what options
+are available.
+
+## How delegation works
+
+The mixin checks `scopedLogger` on every call:
+
+```dart
+void logInfo(String msg, {Object? data, String? method}) {
+  final s = scopedLogger;
+  s != null
+      ? s.info(msg, data: data, method: method)
+      : HyperLogger.info<T>(msg, data: data, method: method);
+}
+```
+
+- If `scopedLogger` returns a `ScopedLoggerApi<T>`, all calls go
+  through it. The scoped logger's mode, minLevel, tag, and
+  skipCrashReporting settings apply.
+- If `scopedLogger` returns `null` (the default), calls fall back to the
+  corresponding `HyperLogger` static method with `<T>` forwarded. Global
+  settings apply.
+
+The full chain when a scoped logger is present:
+`logInfo()` -> `ScopedLogger.info()` -> `HyperLogger.info<T>()`
+
+The scoped logger applies its own filtering and tagging, then delegates
+to the global `HyperLogger` for printing and delegate dispatch.
 
 ## Available methods
 
@@ -69,35 +103,28 @@ class MyService with HyperLoggerMixin<MyService> {
 
   MyService({this.scopedLogger});
 }
+```
 
-// In tests:
+In your test:
+
+```dart
 final mock = MockLogger();
 final service = MyService(scopedLogger: mock);
 service.doWork();
 expect(mock.infoCalls, contains('work started'));
 ```
 
-## When to use the mixin vs static calls vs scoped loggers
+`ScopedLoggerApi<T>` is an interface, so any test double that implements
+it works. No special mocking library required.
 
-| Approach | Best for |
-|---|---|
-| `HyperLogger.info<T>(...)` | One-off calls, scripts, top-level functions |
-| `HyperLoggerMixin<T>` | Classes that log frequently — avoids repeating `<T>` |
-| `ScopedLogger` directly | Feature modules that need tags, level filters, or mode toggling |
-| Mixin + `scopedLogger` | Classes that log frequently AND need scoped config |
+See [Testing](testing.md) for more patterns.
 
-## Fallback behavior
+## When to use the mixin vs. other approaches
 
-If `scopedLogger` returns `null` (the default), every `logX` call falls
-back to the corresponding `HyperLogger` static method. This means:
+If you're just getting started, `HyperLogger.info<T>(...)` is all you
+need. Reach for the mixin when you find yourself repeating the same
+type parameter in a class over and over. For a full comparison table,
+see [Scoped loggers: When to use scoped loggers](scoped_loggers.md#when-to-use-scoped-loggers).
 
-- The global `mode`, `logFilter`, and `printer` apply
-- Delegates fire as configured globally
-- `captureStackTrace` setting is respected
-
-If `scopedLogger` is provided:
-
-- The scoped logger's `mode`, `minLevel`, and `tag` apply
-- Delegates fire through the scoped logger's dispatch
-- The global mode is still respected (most restrictive wins for global mode;
-  scoped mode is independent)
+See [example/mixin_example.dart](../example/mixin_example.dart) for a
+full runnable example.
