@@ -6,6 +6,7 @@ import '../model/log_entry.dart';
 import '../model/log_level.dart';
 import '../model/log_message.dart';
 import '../model/log_section.dart';
+import '../printer/logger_name_filter.dart';
 import 'caller_extractor.dart';
 import 'stack_trace_parser.dart';
 
@@ -34,16 +35,32 @@ class ExtractionResult {
 /// All expensive work (JSON serialisation, stack-trace parsing, caller
 /// extraction) happens here and only here. Everything downstream works
 /// with pre-parsed data.
-/// True in release/production mode where Type.toString() returns minified names.
-const bool _isReleaseMode = bool.fromEnvironment('dart.vm.product');
-
 class ContentExtractor {
+  /// Default value for [suppressTypeNames]: `true` when
+  /// `dart.vm.product` is set (Flutter `--release`, `dart compile exe
+  /// --release`).
+  ///
+  /// Caveat (round-9 audit fix H4): the flag is unreliable on
+  /// `dart compile js` builds — pure-Dart web release builds may
+  /// minify type names while leaving `dart.vm.product` as `false`.
+  /// Construct your printer with an explicit `suppressTypeNames: true`
+  /// when targeting web.
+  static const bool defaultSuppressTypeNames = bool.fromEnvironment(
+    'dart.vm.product',
+  );
+
   final StackTraceParser stackTraceParser;
   final CallerExtractor callerExtractor;
+
+  /// When `true`, the extractor skips rendering `Type.toString()` into
+  /// the className section. Useful in production / minified builds
+  /// where type names may have been mangled.
+  final bool suppressTypeNames;
 
   const ContentExtractor({
     required this.stackTraceParser,
     required this.callerExtractor,
+    this.suppressTypeNames = defaultSuppressTypeNames,
   });
 
   ExtractionResult extract(LogEntry entry) {
@@ -64,12 +81,24 @@ class ContentExtractor {
         sections.add(LogSection(SectionKind.data, _formatData(data)));
       }
 
+      // ── context section ──────────────────────────────────────────────────
+      // Round-8 fix: previously the request-scoped `context` map (set
+      // via `child(context: {...})`) was only observable on cloud
+      // printers — terminal/CI output silently dropped it. The README
+      // and `LogMessage.context` doc both implied terminal printers
+      // would render it inline, so users adopting the child API were
+      // surprised. Render as JSON for consistency with `data`.
+      final context = object.context;
+      if (context != null && context.isNotEmpty) {
+        sections.add(LogSection(SectionKind.context, _formatData(context)));
+      }
+
       // ── className / methodName ────────────────────────────────────────────
-      // In release mode (dart2js), Type.toString() returns minified names.
-      // Skip type rendering to avoid garbled output.
-      if (!_isReleaseMode) {
+      // In release/minified builds, Type.toString() may return mangled
+      // names. Skip type rendering when [suppressTypeNames] is set.
+      if (!suppressTypeNames) {
         final typeName = object.type.toString();
-        if (typeName != 'dynamic' && typeName != 'Object') {
+        if (!isGenericLoggerName(typeName)) {
           className = typeName;
         }
       }

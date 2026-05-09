@@ -7,7 +7,7 @@ import '../model/resolved_style.dart';
 /// Reconciles all [LogStyle] flags into concrete [ResolvedSectionStyle] and
 /// [ResolvedBorderStyle] values.
 ///
-/// This is the **only** place where flag interactions live — every downstream
+/// This is the only place where flag interactions live — every downstream
 /// renderer receives already-resolved styles and applies them blindly.
 ///
 /// Design: CSS-cascade model.
@@ -147,6 +147,7 @@ class StyleResolver {
       SectionKind.message => _whiteText,
       SectionKind.timestamp => _whiteText,
       SectionKind.data => null,
+      SectionKind.context => null,
       SectionKind.error => _whiteText,
       SectionKind.stackTrace => null,
     };
@@ -158,6 +159,7 @@ class StyleResolver {
       SectionKind.message => _levelBg(style, level),
       SectionKind.timestamp => _levelBg(style, level),
       SectionKind.data => null,
+      SectionKind.context => null,
       SectionKind.error => _errorBgColor,
       SectionKind.stackTrace => null,
     };

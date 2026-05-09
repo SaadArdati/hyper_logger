@@ -1,192 +1,331 @@
-import 'package:hyper_logger/src/platform/environment_detector.dart';
+import 'package:hyper_logger/hyper_logger.dart';
 import 'package:test/test.dart';
+
+const _humanFallback = TerminalCapabilities(
+  ansi: false,
+  tty: false,
+  width: null,
+);
 
 void main() {
   group('EnvironmentDetector.detect', () {
-    test('detects Cloud Run when K_SERVICE is set', () {
+    // ── GCP detection ─────────────────────────────────────────────────────────
+
+    test('detects GCP when K_SERVICE is set (Cloud Run)', () {
       final env = const EnvironmentDetector().detect(
         envOverride: {'K_SERVICE': 'my-service'},
-        ansiSupportOverride: true,
+        capabilitiesOverride: _humanFallback,
       );
-      expect(env, RuntimeEnvironment.cloudRun);
+      expect(env, const GcpEnvironment());
     });
 
-    test('Cloud Run takes precedence over CI', () {
+    test('detects GCP when GAE_SERVICE is set (App Engine)', () {
+      final env = const EnvironmentDetector().detect(
+        envOverride: {'GAE_SERVICE': 'frontend'},
+        capabilitiesOverride: _humanFallback,
+      );
+      expect(env, const GcpEnvironment());
+    });
+
+    test('detects GCP when FUNCTION_NAME is set (Cloud Functions gen 1)', () {
+      final env = const EnvironmentDetector().detect(
+        envOverride: {'FUNCTION_NAME': 'helloHttp'},
+        capabilitiesOverride: _humanFallback,
+      );
+      expect(env, const GcpEnvironment());
+    });
+
+    test('detects GCP when FUNCTION_TARGET is set (Cloud Functions gen 2)', () {
+      final env = const EnvironmentDetector().detect(
+        envOverride: {'FUNCTION_TARGET': 'helloPubSub'},
+        capabilitiesOverride: _humanFallback,
+      );
+      expect(env, const GcpEnvironment());
+    });
+
+    test('GCP takes precedence over CI', () {
       final env = const EnvironmentDetector().detect(
         envOverride: {'K_SERVICE': 'svc', 'CI': 'true'},
-        ansiSupportOverride: true,
+        capabilitiesOverride: _humanFallback,
       );
-      expect(env, RuntimeEnvironment.cloudRun);
+      expect(env, const GcpEnvironment());
     });
 
-    test('Cloud Run takes precedence over IDE', () {
+    // ── AWS detection ─────────────────────────────────────────────────────────
+
+    test('detects AWS when AWS_LAMBDA_FUNCTION_NAME is set (Lambda)', () {
       final env = const EnvironmentDetector().detect(
-        envOverride: {'K_SERVICE': 'svc', 'IDEA_INITIAL_DIRECTORY': '/home'},
-        ansiSupportOverride: true,
+        envOverride: {'AWS_LAMBDA_FUNCTION_NAME': 'my-fn'},
+        capabilitiesOverride: _humanFallback,
       );
-      expect(env, RuntimeEnvironment.cloudRun);
+      expect(env, const AwsEnvironment());
+    });
+
+    test('detects AWS via ECS_CONTAINER_METADATA_URI_V4 (Fargate)', () {
+      final env = const EnvironmentDetector().detect(
+        envOverride: {
+          'ECS_CONTAINER_METADATA_URI_V4': 'http://169.254.170.2/v4/abc',
+        },
+        capabilitiesOverride: _humanFallback,
+      );
+      expect(env, const AwsEnvironment());
+    });
+
+    test('detects AWS via ECS_CONTAINER_METADATA_URI (legacy ECS)', () {
+      final env = const EnvironmentDetector().detect(
+        envOverride: {
+          'ECS_CONTAINER_METADATA_URI': 'http://169.254.170.2/v3/abc',
+        },
+        capabilitiesOverride: _humanFallback,
+      );
+      expect(env, const AwsEnvironment());
+    });
+
+    // ── Azure detection ──────────────────────────────────────────────────────
+
+    test('detects Azure via WEBSITE_SITE_NAME (App Service / Functions)', () {
+      final env = const EnvironmentDetector().detect(
+        envOverride: const {'WEBSITE_SITE_NAME': 'my-app'},
+        capabilitiesOverride: _humanFallback,
+      );
+      expect(env, const AzureEnvironment());
+    });
+
+    test('detects Azure via FUNCTIONS_WORKER_RUNTIME', () {
+      final env = const EnvironmentDetector().detect(
+        envOverride: const {'FUNCTIONS_WORKER_RUNTIME': 'dart'},
+        capabilitiesOverride: _humanFallback,
+      );
+      expect(env, const AzureEnvironment());
+    });
+
+    test('detects Azure via CONTAINER_APP_NAME', () {
+      final env = const EnvironmentDetector().detect(
+        envOverride: const {'CONTAINER_APP_NAME': 'svc-1'},
+        capabilitiesOverride: _humanFallback,
+      );
+      expect(env, const AzureEnvironment());
+    });
+
+    test('GCP takes precedence over Azure when both are set', () {
+      final env = const EnvironmentDetector().detect(
+        envOverride: const {
+          'K_SERVICE': 'gcp-svc',
+          'WEBSITE_SITE_NAME': 'azure-app',
+        },
+        capabilitiesOverride: _humanFallback,
+      );
+      expect(env, const GcpEnvironment());
+    });
+
+    test('AWS takes precedence over Azure when both are set', () {
+      final env = const EnvironmentDetector().detect(
+        envOverride: const {
+          'AWS_LAMBDA_FUNCTION_NAME': 'lambda-fn',
+          'WEBSITE_SITE_NAME': 'azure-app',
+        },
+        capabilitiesOverride: _humanFallback,
+      );
+      expect(env, const AwsEnvironment());
+    });
+
+    test('AWS takes precedence over CI (CodeBuild on ECS)', () {
+      final env = const EnvironmentDetector().detect(
+        envOverride: {
+          'ECS_CONTAINER_METADATA_URI_V4': 'http://x',
+          'CODEBUILD_BUILD_ID': 'codebuild:abc',
+        },
+        capabilitiesOverride: _humanFallback,
+      );
+      expect(env, const AwsEnvironment());
+    });
+
+    test('GCP takes precedence over AWS when both signals are set', () {
+      final env = const EnvironmentDetector().detect(
+        envOverride: {
+          'K_SERVICE': 'gcp-svc',
+          'AWS_LAMBDA_FUNCTION_NAME': 'lambda-fn',
+        },
+        capabilitiesOverride: _humanFallback,
+      );
+      expect(env, const GcpEnvironment());
     });
 
     // ── CI detection ──────────────────────────────────────────────────────────
 
-    test('detects CI when CI env var is set', () {
-      final env = const EnvironmentDetector().detect(
-        envOverride: {'CI': 'true'},
-        ansiSupportOverride: false,
-      );
-      expect(env, RuntimeEnvironment.ci);
-    });
+    for (final key in const [
+      'CI',
+      'GITHUB_ACTIONS',
+      'GITLAB_CI',
+      'JENKINS_URL',
+      'CIRCLECI',
+      'TRAVIS',
+      'BUILDKITE',
+      'TF_BUILD',
+      'BITBUCKET_BUILD_NUMBER',
+      'TEAMCITY_VERSION',
+      'CODEBUILD_BUILD_ID',
+    ]) {
+      test('detects CI via $key', () {
+        final env = const EnvironmentDetector().detect(
+          envOverride: {key: 'true'},
+          capabilitiesOverride: _humanFallback,
+        );
+        expect(env, const CiEnvironment());
+      });
+    }
 
-    test('detects CI via GITHUB_ACTIONS', () {
-      final env = const EnvironmentDetector().detect(
-        envOverride: {'GITHUB_ACTIONS': 'true'},
-        ansiSupportOverride: false,
-      );
-      expect(env, RuntimeEnvironment.ci);
-    });
+    // ── Human + capability dispatch ───────────────────────────────────────────
 
-    test('detects CI via GITLAB_CI', () {
-      final env = const EnvironmentDetector().detect(
-        envOverride: {'GITLAB_CI': 'true'},
-        ansiSupportOverride: false,
-      );
-      expect(env, RuntimeEnvironment.ci);
-    });
-
-    test('detects CI via JENKINS_URL', () {
-      final env = const EnvironmentDetector().detect(
-        envOverride: {'JENKINS_URL': 'http://jenkins'},
-        ansiSupportOverride: false,
-      );
-      expect(env, RuntimeEnvironment.ci);
-    });
-
-    test('detects CI via CIRCLECI', () {
-      final env = const EnvironmentDetector().detect(
-        envOverride: {'CIRCLECI': 'true'},
-        ansiSupportOverride: false,
-      );
-      expect(env, RuntimeEnvironment.ci);
-    });
-
-    test('detects CI via TRAVIS', () {
-      final env = const EnvironmentDetector().detect(
-        envOverride: {'TRAVIS': 'true'},
-        ansiSupportOverride: false,
-      );
-      expect(env, RuntimeEnvironment.ci);
-    });
-
-    test('detects CI via BUILDKITE', () {
-      final env = const EnvironmentDetector().detect(
-        envOverride: {'BUILDKITE': 'true'},
-        ansiSupportOverride: false,
-      );
-      expect(env, RuntimeEnvironment.ci);
-    });
-
-    test('detects CI via TF_BUILD (Azure Pipelines)', () {
-      final env = const EnvironmentDetector().detect(
-        envOverride: {'TF_BUILD': 'True'},
-        ansiSupportOverride: false,
-      );
-      expect(env, RuntimeEnvironment.ci);
-    });
-
-    test('detects CI via BITBUCKET_BUILD_NUMBER', () {
-      final env = const EnvironmentDetector().detect(
-        envOverride: {'BITBUCKET_BUILD_NUMBER': '42'},
-        ansiSupportOverride: false,
-      );
-      expect(env, RuntimeEnvironment.ci);
-    });
-
-    test('detects CI via TEAMCITY_VERSION', () {
-      final env = const EnvironmentDetector().detect(
-        envOverride: {'TEAMCITY_VERSION': '2024.1'},
-        ansiSupportOverride: false,
-      );
-      expect(env, RuntimeEnvironment.ci);
-    });
-
-    test('detects CI via CODEBUILD_BUILD_ID', () {
-      final env = const EnvironmentDetector().detect(
-        envOverride: {'CODEBUILD_BUILD_ID': 'build-123'},
-        ansiSupportOverride: false,
-      );
-      expect(env, RuntimeEnvironment.ci);
-    });
-
-    test('CI takes precedence over IDE', () {
-      final env = const EnvironmentDetector().detect(
-        envOverride: {'CI': 'true', 'IDEA_INITIAL_DIRECTORY': '/home'},
-        ansiSupportOverride: true,
-      );
-      expect(env, RuntimeEnvironment.ci);
-    });
-
-    // ── IDE detection ─────────────────────────────────────────────────────────
-
-    test('detects IDE via IDEA_INITIAL_DIRECTORY (JetBrains)', () {
-      final env = const EnvironmentDetector().detect(
-        envOverride: {'IDEA_INITIAL_DIRECTORY': '/home/user/project'},
-        ansiSupportOverride: false,
-      );
-      expect(env, RuntimeEnvironment.ide);
-    });
-
-    test('detects IDE via JETBRAINS_IDE', () {
-      final env = const EnvironmentDetector().detect(
-        envOverride: {'JETBRAINS_IDE': 'IntelliJ IDEA'},
-        ansiSupportOverride: false,
-      );
-      expect(env, RuntimeEnvironment.ide);
-    });
-
-    test('detects IDE via TERM_PROGRAM=vscode', () {
-      final env = const EnvironmentDetector().detect(
-        envOverride: {'TERM_PROGRAM': 'vscode'},
-        ansiSupportOverride: false,
-      );
-      expect(env, RuntimeEnvironment.ide);
-    });
-
-    test('TERM_PROGRAM != vscode does not trigger IDE', () {
-      final env = const EnvironmentDetector().detect(
-        envOverride: {'TERM_PROGRAM': 'iTerm.app'},
-        ansiSupportOverride: true,
-      );
-      expect(env, isNot(RuntimeEnvironment.ide));
-    });
-
-    // ── Terminal detection ─────────────────────────────────────────────────────
-
-    test('detects terminal when ANSI is supported', () {
+    test('falls through to HumanEnvironment with the supplied capabilities',
+        () {
+      const caps = TerminalCapabilities(ansi: true, tty: true, width: 120);
       final env = const EnvironmentDetector().detect(
         envOverride: {},
-        ansiSupportOverride: true,
+        capabilitiesOverride: caps,
       );
-      expect(env, RuntimeEnvironment.terminal);
+      expect(env, const HumanEnvironment(caps));
     });
 
-    // ── Plain fallback ────────────────────────────────────────────────────────
-
-    test('falls back to plain when nothing detected', () {
+    test('HumanEnvironment carries no-ansi / no-tty fallback as plain', () {
       final env = const EnvironmentDetector().detect(
         envOverride: {},
-        ansiSupportOverride: false,
+        capabilitiesOverride: _humanFallback,
       );
-      expect(env, RuntimeEnvironment.plain);
+      expect(env, isA<HumanEnvironment>());
+      final h = env as HumanEnvironment;
+      expect(h.capabilities.ansi, isFalse);
+      expect(h.capabilities.tty, isFalse);
+      expect(h.capabilities.width, isNull);
     });
   });
 
-  group('RuntimeEnvironment', () {
-    test('has all expected values', () {
-      expect(RuntimeEnvironment.values, hasLength(5));
-      expect(
-        RuntimeEnvironment.values.map((e) => e.name).toList(),
-        containsAll(['cloudRun', 'ci', 'ide', 'terminal', 'plain']),
+  group('EnvironmentDetector.detectCapabilities', () {
+    // The static `detectCapabilities` is the live stdio + env hook —
+    // most tests above bypass it via `capabilitiesOverride`. These
+    // tests pin the env-derived branches that *don't* depend on stdio.
+
+    test(
+      'IntelliJ-launched child (macOS __CFBundleIdentifier) is '
+      'recognized as ANSI-capable even when stdout is a pipe',
+      () {
+        // The whole point of the round-8 refactor: IntelliJ Run
+        // Configurations are not TTYs, but their Run Console DOES
+        // render ANSI. The bundle-ID heuristic kicks in to flip
+        // `ansi: true` for known IDE bundles.
+        final caps = EnvironmentDetector.detectCapabilities(
+          envOverride: const {
+            '__CFBundleIdentifier': 'com.jetbrains.intellij',
+          },
+        );
+        // tty depends on the live test runner's stdout; we don't pin
+        // that. We DO pin that ansi flipped on for the IntelliJ case.
+        if (!caps.tty) {
+          expect(caps.ansi, isTrue,
+              reason: 'IntelliJ bundle ID without a TTY must enable '
+                  'ANSI for the Run Console preset');
+        }
+      },
+    );
+
+    test(
+      'Android Studio child (__CFBundleIdentifier match) → ANSI on '
+      'in non-TTY contexts',
+      () {
+        final caps = EnvironmentDetector.detectCapabilities(
+          envOverride: const {
+            '__CFBundleIdentifier': 'com.google.android.studio',
+          },
+        );
+        if (!caps.tty) {
+          expect(caps.ansi, isTrue);
+        }
+      },
+    );
+
+    test(
+      'VS Code child (__CFBundleIdentifier match) → ANSI on in '
+      'non-TTY contexts',
+      () {
+        final caps = EnvironmentDetector.detectCapabilities(
+          envOverride: const {
+            '__CFBundleIdentifier': 'com.microsoft.VSCode',
+          },
+        );
+        if (!caps.tty) {
+          expect(caps.ansi, isTrue);
+        }
+      },
+    );
+
+    test(
+      'unknown bundle ID without TTY produces no-ANSI capabilities',
+      () {
+        final caps = EnvironmentDetector.detectCapabilities(
+          envOverride: const {
+            '__CFBundleIdentifier': 'com.example.SomeOtherApp',
+          },
+        );
+        if (!caps.tty) {
+          expect(caps.ansi, isFalse,
+              reason: 'unrecognized bundle IDs fall through to the safe '
+                  'no-ANSI default — guards against false positives');
+        }
+      },
+    );
+
+    test('empty env without TTY produces flat-false capabilities', () {
+      final caps = EnvironmentDetector.detectCapabilities(
+        envOverride: const {},
       );
+      if (!caps.tty) {
+        expect(caps.ansi, isFalse);
+        expect(caps.width, isNull);
+      }
+    });
+  });
+
+  group('TerminalCapabilities', () {
+    test('value-equals on ansi/tty/width', () {
+      expect(
+        const TerminalCapabilities(ansi: true, tty: false, width: 80),
+        equals(const TerminalCapabilities(ansi: true, tty: false, width: 80)),
+      );
+      expect(
+        const TerminalCapabilities(ansi: true, tty: true),
+        isNot(equals(const TerminalCapabilities(ansi: true, tty: false))),
+      );
+    });
+
+    test('toString surfaces all three fields', () {
+      const caps = TerminalCapabilities(ansi: true, tty: false, width: 100);
+      expect(caps.toString(), contains('ansi: true'));
+      expect(caps.toString(), contains('tty: false'));
+      expect(caps.toString(), contains('width: 100'));
+    });
+  });
+
+  group('RuntimeEnvironment sealed hierarchy', () {
+    test('GcpEnvironment is value-equal to itself', () {
+      expect(const GcpEnvironment(), equals(const GcpEnvironment()));
+    });
+    test('AwsEnvironment is value-equal to itself', () {
+      expect(const AwsEnvironment(), equals(const AwsEnvironment()));
+    });
+    test('AzureEnvironment is value-equal to itself', () {
+      expect(const AzureEnvironment(), equals(const AzureEnvironment()));
+    });
+    test('CiEnvironment is value-equal to itself', () {
+      expect(const CiEnvironment(), equals(const CiEnvironment()));
+    });
+    test('HumanEnvironment compares by capabilities', () {
+      const a = HumanEnvironment(_humanFallback);
+      const b = HumanEnvironment(_humanFallback);
+      const c = HumanEnvironment(
+        TerminalCapabilities(ansi: true, tty: true),
+      );
+      expect(a, equals(b));
+      expect(a, isNot(equals(c)));
     });
   });
 }

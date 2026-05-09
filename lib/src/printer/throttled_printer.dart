@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:collection';
 
+import 'package:clock/clock.dart';
+
 import '../model/log_entry.dart';
 import '../model/log_level.dart';
 import 'log_printer.dart';
@@ -35,17 +37,33 @@ class ThrottledPrinter implements LogPrinter {
   Timer? _drainTimer;
   int _countThisWindow = 0;
   int _droppedCount = 0;
-  DateTime _windowStart = DateTime.now();
+  DateTime _windowStart = clock.now();
 
   ThrottledPrinter(
     this.inner, {
     this.maxPerSecond = 30,
     this.maxQueueSize = 500,
-  });
+  }) {
+    if (maxPerSecond < 1) {
+      throw ArgumentError.value(
+        maxPerSecond,
+        'maxPerSecond',
+        'must be >= 1; a non-positive value would prevent the queue from '
+            'ever draining',
+      );
+    }
+    if (maxQueueSize < 1) {
+      throw ArgumentError.value(
+        maxQueueSize,
+        'maxQueueSize',
+        'must be >= 1; a non-positive value would crash on overflow drop',
+      );
+    }
+  }
 
   @override
   void log(LogEntry entry) {
-    final now = DateTime.now();
+    final now = clock.now();
 
     // Reset the window if a second has elapsed.
     if (now.difference(_windowStart).inMilliseconds >= 1000) {
@@ -74,19 +92,33 @@ class ThrottledPrinter implements LogPrinter {
   void flush() {
     _drainTimer?.cancel();
     _drainTimer = null;
-    _emitDroppedSummary();
+    _emitDroppedSummary(consumeBudget: false);
     while (_queue.isNotEmpty) {
       inner.log(_queue.removeFirst());
     }
   }
 
+  /// Cancels the in-flight drain timer (no-op if none is scheduled)
+  /// and disposes the wrapped inner printer.
+  ///
+  /// Round-9 audit fix (M6): without this, replacing the global
+  /// printer via `HyperLogger.init(printer: ...)` would leak the
+  /// drain `Timer`, which would keep firing on the orphan instance
+  /// indefinitely.
+  @override
+  void dispose() {
+    _drainTimer?.cancel();
+    _drainTimer = null;
+    inner.dispose();
+  }
+
   void _scheduleDrain() {
-    if (_drainTimer != null && _drainTimer!.isActive) return;
+    if (_drainTimer?.isActive ?? false) return;
     _drainTimer = Timer(const Duration(milliseconds: 100), _drain);
   }
 
   void _drain() {
-    final now = DateTime.now();
+    final now = clock.now();
     if (now.difference(_windowStart).inMilliseconds >= 1000) {
       _windowStart = now;
       _countThisWindow = 0;
@@ -105,17 +137,28 @@ class ThrottledPrinter implements LogPrinter {
     }
   }
 
-  void _emitDroppedSummary() {
+  void _emitDroppedSummary({bool consumeBudget = true}) {
     if (_droppedCount == 0) return;
     final dropped = _droppedCount;
     _droppedCount = 0;
-    _countThisWindow++;
+    // Intentional: the synthetic summary always emits, even when the
+    // window is at cap. Suppressing it would hide the loss; overshoot
+    // is at most one record per window.
+    //
+    // Round-9 audit fix (L9): when called from `flush()`, do NOT
+    // consume a budget slot — `flush()` is meant to bypass the rate
+    // limit entirely, and incrementing `_countThisWindow` here would
+    // make the next regular log call after `flush()` hit the cap one
+    // record early.
+    if (consumeBudget) {
+      _countThisWindow++;
+    }
     inner.log(
       LogEntry(
         level: LogLevel.warning,
         message: '... $dropped log entries dropped (throttled)',
         loggerName: 'ThrottledPrinter',
-        time: DateTime.now(),
+        time: clock.now(),
       ),
     );
   }

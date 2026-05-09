@@ -70,6 +70,11 @@ class BufferedRemotePrinter implements LogPrinter {
     _buffer.clear();
     onFlush(batch);
   }
+
+  @override
+  void dispose() {
+    flush();
+  }
 }
 
 class App {}

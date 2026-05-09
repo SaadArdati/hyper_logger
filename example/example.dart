@@ -10,8 +10,8 @@ import 'package:hyper_logger/hyper_logger.dart';
 /// The type parameter is always optional. Without it you still get the
 /// method name extracted from the stack trace.
 void simplestUsage() {
-  HyperLogger.info('Server started on port 8080');
-  HyperLogger.debug('Cache warmed', data: {'entries': 42});
+  HyperLogger.info<dynamic>('Server started on port 8080');
+  HyperLogger.debug<dynamic>('Cache warmed', data: {'entries': 42});
 }
 
 /// Add a type parameter to include the class name in the prefix.

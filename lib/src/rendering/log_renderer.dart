@@ -25,7 +25,7 @@ class LogRenderer {
     final borderStyle = resolver.resolveBorder(style, extraction.level);
 
     final String? timestampStr = style.timestamp
-        ? _formatTimestamp(extraction.time, extraction.level, style)
+        ? _formatTimestamp(extraction.time, extraction.level, style.dateTimeFormatter)
         : null;
 
     final sections = <LogSection>[
@@ -64,9 +64,12 @@ class LogRenderer {
     return buffer;
   }
 
-  String _formatTimestamp(DateTime time, LogLevel level, LogStyle style) {
-    final formatter =
-        style.dateTimeFormatter ?? (DateTime dt) => dt.toIso8601String();
+  String _formatTimestamp(
+    DateTime time,
+    LogLevel level,
+    String Function(DateTime)? customFormatter,
+  ) {
+    final formatter = customFormatter ?? (DateTime dt) => dt.toIso8601String();
     return '${formatter(time)} [${level.label}]';
   }
 }

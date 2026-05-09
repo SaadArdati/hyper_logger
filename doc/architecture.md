@@ -24,7 +24,7 @@ _handleLogRecord
 LogEntry.fromLogRecord (conversion boundary; logging package hidden from here on)
   |
   v
-LogFilter (if configured, can suppress the entry here)
+Interceptors (run in order; first one to return null drops the entry)
   |
   v
 LogPrinter.log(LogEntry)
@@ -107,21 +107,115 @@ extraction still works since it operates on frame member names, not
 Printer selection is handled through conditional exports:
 
 - **Native** (`printer_factory_native.dart`): Returns
-  `LogPrinterPresets.automatic()`, which detects Cloud Run, CI, IDE,
-  terminal ANSI support, or falls back to plain text.
+  `LogPrinterPresets.automatic()`, which detects GCP / AWS / CI by
+  environment markers, then falls through to a `human(capabilities)`
+  preset composed from the live stdout's ANSI / TTY / width.
 - **Web** (`printer_factory_web.dart`): Returns `WebConsolePrinter()`.
 
 Detection runs once at init time, not per log call.
+
+## Performance
+
+Numbers below are from `benchmark/hyper_logger_benchmark.dart` and
+`benchmark/cloud_parity_benchmark.dart` (Apple Silicon, Dart VM, AOT).
+Re-run them on your hardware before quoting them anywhere that matters
+— absolute throughput is machine-dependent; the ratios are not.
+
+### Hot path (formatting cost per record)
+
+| Printer                                 | Median  | Throughput  |
+| --------------------------------------- | ------: | ----------: |
+| `DirectPrinter` (raw passthrough)       |    11ns |  90.1M ops/s |
+| `ComposablePrinter` (no decorators)     |   411ns |   2.4M ops/s |
+| `LogPrinterPresets.human(ansi+pipe)`    |   573ns |   1.8M ops/s |
+| `LogPrinterPresets.ci`                  |   732ns |   1.4M ops/s |
+| `LogPrinterPresets.gcp` / `aws` / `azure` | ~1.1µs | ~900K ops/s |
+| `LogPrinterPresets.terminal` (full UI)  |   1.8µs |   565K ops/s |
+
+The terminal preset is the slowest because it composes every decorator
+(emoji, box, ANSI color, prefix) and walks the section list multiple
+times to build a multi-line bordered render. Cloud printers skip the
+section pipeline entirely and emit a single JSON line.
+
+### Disabled and filtered paths
+
+These are the calls in production code where the global mode or scoped
+filter rejects the entry — they should be free, and they are:
+
+| Operation                                    | Cost  | Throughput   |
+| -------------------------------------------- | ----: | -----------: |
+| `LogMode.silent` short-circuit               |  10ns |   96M ops/s  |
+| `ScopedLogger(mode: disabled)` early return  |  14ns |   71M ops/s  |
+| `ScopedLogger(minLevel: WARNING)` filtering INFO | 14ns | 70M ops/s |
+
+The takeaway: leaving `HyperLogger.debug<T>(...)` or
+`HyperLogger.trace<T>(...)` calls in production code costs nothing as
+long as the global mode or a scoped `minLevel` filters them out. There
+is no need to wrap them in `if (kDebugMode)` guards.
+
+### Cloud printer parity
+
+The three cloud printers share a common base (`CloudJsonPrinterBase`)
+and perform within 5% of each other across all scenarios:
+
+| Scenario             | GCP    | AWS    | Azure  |
+| -------------------- | -----: | -----: | -----: |
+| Simple INFO          | 1132ns | 1117ns | 1074ns |
+| INFO with `data` map | 1967ns | 1990ns | 1910ns |
+| ERROR with stack     |  22.2µs |  22.4µs |  22.4µs |
+
+`AzureJsonPrinter` is marginally faster on the simple path because its
+numeric `severityLevel` skips the string-switch the others need. On the
+data-payload scenario it nests user context under `customDimensions`
+(per the AppInsights data model) instead of merging at root, but the
+extra map allocation is small enough not to show up.
+
+### Error-path latency is dominated by stack-trace parsing
+
+A `SEVERE`-level entry with an `exception` and `stackTrace` costs
+~430µs on terminal/CI presets — orders of magnitude more than a
+plain INFO. The breakdown (from `benchmark/deep_dive_benchmark.dart`):
+
+| Step                                              | Median  |
+| ------------------------------------------------- | ------: |
+| `Chain.forTrace(StackTrace.current)` (raw parse)  |  28.6µs |
+| `StackTraceParser` (filtering + formatting, n=10) |  84.3µs |
+| `CallerExtractor.extract`                         |  51.7µs |
+| `ContentExtractor.extract` (full error record)    | 427.9µs |
+| `ContentExtractor.extract` (simple INFO, no stack) |  185ns |
+
+Cloud printers (GCP/AWS/Azure) skip the chain parse — they pass the
+stack trace through `toString()` straight into the JSON — so error
+records cost ~22µs, not ~430µs. That asymmetry is intentional: human
+readers want pretty per-frame output; cloud aggregators want raw text.
+
+If your service emits sustained high-rate error logs and you don't need
+stack-trace grooming, prefer a cloud printer (or
+`StackTraceParser(methodCount: 0)` to skip parsing entirely — that
+drops the cost back to ~21ns).
+
+### Stack-capture cost
+
+`captureStackTrace: true` (the default) calls `StackTrace.current` on
+every log call that doesn't pass an explicit `method:`. Cost: ~700ns
+per call. On a hot loop, set `captureStackTrace: false` in
+`HyperLogger.init(...)` and pass `method:` explicitly; on a normal app
+this is in the noise.
 
 ## Type hierarchy
 
 ```
 LogPrinter (interface)
   ├── ComposablePrinter (decorator pipeline)
-  ├── JsonPrinter (Cloud Logging JSON)
+  ├── CloudJsonPrinterBase (internal — shared cloud JSON formatter)
+  │     ├── GcpJsonPrinter (Google Cloud Logging JSON)
+  │     ├── AwsJsonPrinter (AWS CloudWatch JSON)
+  │     └── AzureJsonPrinter (Azure Application Insights traces)
+  ├── RotatingFilePrinter (file output with rotation, gzip, retention)
   ├── DirectPrinter (raw passthrough)
   ├── WebConsolePrinter (Chrome DevTools)
-  └── ThrottledPrinter (rate-limiting wrapper)
+  ├── ThrottledPrinter (rate-limiting wrapper)
+  └── MultiPrinter (fan-out wrapper)
 
 LogDecorator (abstract)
   ├── BoxDecorator
@@ -150,7 +244,8 @@ provided).
 Created from `logging.LogRecord` in `_handleLogRecord()`. This is the
 public-facing record type that printers receive. The `object` field
 contains the original `LogMessage`, which printers like
-`ComposablePrinter` and `JsonPrinter` unwrap to access structured data.
+`ComposablePrinter`, `GcpJsonPrinter`, and `AwsJsonPrinter` unwrap to access
+structured data.
 
 ### ExtractionResult
 

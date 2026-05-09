@@ -18,6 +18,9 @@ class _RecordingPrinter implements LogPrinter {
   void log(LogEntry entry) {
     entries.add(entry);
   }
+
+  @override
+  void dispose() {}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

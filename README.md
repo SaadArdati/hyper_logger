@@ -29,13 +29,13 @@ always optional: omit it when you don't need it, add it when you do.
 
 ## Every environment, one API
 
-`LogPrinterPresets.automatic()` detects terminal, IDE, CI, and Cloud Run
+`LogPrinterPresets.automatic()` detects GCP, AWS, CI, and human
 and selects the best format:
 
 **Terminal** (emoji + box + ANSI colors)
 ![Terminal](assets/preview_terminal.png)
 
-**IDE** (emoji + prefix, clean)
+**IDE Run Console** (emoji + ANSI color + prefix, no box)
 ![IDE](assets/preview_ide.png)
 
 **CI** (timestamp + prefix, machine-parseable)
@@ -153,11 +153,153 @@ HyperLogger.init(
 );
 ```
 
+## Request-scoped child loggers
+
+Attach key-value context to every log call inside a unit of work
+(request, transaction, job) without restating the data per call:
+
+```dart
+void handleRequest(Request req) {
+  final log = HyperLogger.child<Handler>(context: {'requestId': req.id});
+  log.info('Received');
+  log.info('Authenticated', data: {'userId': req.user.id});
+  // Both lines carry requestId; the second carries userId too.
+}
+```
+
+`child(...)` is uncached — each call returns a fresh logger so per-request
+state doesn't leak across unrelated requests. From inside a class, the
+mixin shortcut works the same way:
+
+```dart
+class UserService with HyperLoggerMixin<UserService> {
+  void handleRequest(Request req) {
+    final log = child(context: {'requestId': req.id});
+    log.info('Processing');
+  }
+}
+```
+
+Cloud-shaped printers (`GcpJsonPrinter`, `AwsJsonPrinter`) merge the
+context into the JSON root so log aggregators can correlate by it.
+
+## Interceptors: filter, redact, enrich, sample
+
+`HyperLogger.init(interceptors: [...])` runs each entry through a chain
+of `LogEntry? Function(LogEntry)` — return the entry to pass it through,
+return `null` to drop it. A throwing interceptor is isolated and skipped
+so one bad hook can't black-hole the pipeline.
+
+```dart
+HyperLogger.init(
+  printer: LogPrinterPresets.automatic(),
+  interceptors: [
+    // 1. Drop noisy third-party logs entirely.
+    (e) => e.loggerName.contains('GoTrue') ? null : e,
+    // 2. Redact secrets from messages before they reach the printer.
+    (e) => LogEntry(
+      level: e.level,
+      message: e.message.replaceAll(RegExp(r'token=\S+'), 'token=***'),
+      object: e.object,
+      loggerName: e.loggerName,
+      time: e.time,
+      error: e.error,
+      stackTrace: e.stackTrace,
+    ),
+  ],
+);
+```
+
+## File output with rotation
+
+`RotatingFilePrinter` appends entries to a file with optional rotation
+(by size or interval), gzip compression, and retention. Async path
+providers are supported for Flutter (`path_provider`):
+
+> Flutter snippet: depend on
+> [`path_provider`](https://pub.dev/packages/path_provider) and add
+> `import 'package:path_provider/path_provider.dart';`. The
+> `RotatingFilePrinter` constructor itself does not transitively expose
+> it.
+
+```dart
+final filePrinter = RotatingFilePrinter(
+  baseFilePathProvider: () async {
+    final dir = await getApplicationSupportDirectory();
+    return '${dir.path}/logs/app.log';
+  },
+  rotationConfig: FileRotationConfig.size(
+    maxBytes: 10 * 1024 * 1024,  // 10 MB
+    maxFiles: 5,
+    compress: true,
+  ),
+  onError: (error, stack) {
+    // surface IO failures to your monitoring; default is stderr
+  },
+);
+
+HyperLogger.init(printer: filePrinter);
+// ... at shutdown:
+await filePrinter.close();  // flushes pending writes + in-flight gzip
+```
+
+File output requires `dart:io`; on web the constructor throws
+`UnsupportedError`.
+
+## Fan-out to multiple sinks
+
+`MultiPrinter` dispatches every entry to a list of child printers — use
+it when you want, say, a pretty terminal view *and* a rotating file
+archive at the same time:
+
+```dart
+HyperLogger.init(
+  printer: MultiPrinter([
+    LogPrinterPresets.terminal(),
+    RotatingFilePrinter(
+      baseFilePathProvider: () => '/var/log/app.log',
+      rotationConfig: FileRotationConfig.size(
+        maxBytes: 10 * 1024 * 1024,
+        maxFiles: 5,
+        compress: true,
+      ),
+    ),
+  ]),
+);
+```
+
+Children are isolated — a throwing child doesn't stop the others from
+receiving the entry. After the fan-out, if anything threw, `MultiPrinter`
+raises a `MultiPrinterError` that the package's pipeline-error hook
+catches (`HyperLogger.setPipelineErrorHandler`), so a broken sink
+surfaces instead of disappearing silently. `MultiPrinter` is itself a
+`LogPrinter`, so it composes: wrap it in `ThrottledPrinter` to throttle
+the whole fan-out, or throttle just one child and leave the others alone.
+
+## Cloud platforms
+
+Google Cloud Logging (`GcpJsonPrinter`), AWS CloudWatch (`AwsJsonPrinter`),
+and Azure Application Insights (`AzureJsonPrinter`) are all first-class.
+`LogPrinterPresets.automatic()` detects the runtime (GCP / AWS / Azure / CI)
+and picks the right printer for you. To pin one explicitly:
+
+```dart
+HyperLogger.init(printer: LogPrinterPresets.aws());
+// or .gcp(), or .azure()
+```
+
+For severity ≥ ERROR with both error and stack trace, the trace is
+embedded into the cloud printer's `message` field so Cloud Error
+Reporting (GCP), CloudWatch Logs Insights (AWS), and Application
+Insights' search (Azure) auto-surface the exception. Azure's
+printer additionally nests user `context` under `customDimensions`
+to match the AppInsights `traces` table conventions.
+
 ## Install
 
 ```yaml
 dependencies:
-  hyper_logger: ^0.1.0
+  hyper_logger: ^0.2.0
 ```
 
 ## Documentation

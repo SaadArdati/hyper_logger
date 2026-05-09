@@ -14,11 +14,14 @@ class _ThrowingPrinter implements LogPrinter {
     callCount++;
     throw StateError('Printer exploded!');
   }
+
+  @override
+  void dispose() {}
 }
 
-/// A log filter that throws synchronously.
-bool _throwingFilter(LogEntry entry) {
-  throw StateError('Filter exploded!');
+/// An interceptor that throws synchronously.
+LogEntry? _throwingInterceptor(LogEntry entry) {
+  throw StateError('Interceptor exploded!');
 }
 
 /// A crash reporting delegate that throws synchronously.
@@ -73,6 +76,9 @@ class _CountingPrinter implements LogPrinter {
   void log(LogEntry entry) {
     callCount++;
   }
+
+  @override
+  void dispose() {}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -132,28 +138,58 @@ void main() {
     });
   });
 
-  // ── LogFilter that throws ─────────────────────────────────────────────────
+  // ── Interceptor that throws ───────────────────────────────────────────────
 
-  group('logFilter that throws', () {
-    test('does not crash — error is swallowed by _handleLogRecord', () {
-      HyperLogger.init(printer: _CountingPrinter(), logFilter: _throwingFilter);
+  group('interceptor that throws', () {
+    test('does not crash — error is swallowed per-interceptor', () {
+      HyperLogger.init(
+        printer: _CountingPrinter(),
+        interceptors: [_throwingInterceptor],
+      );
 
-      // The try-catch in _handleLogRecord wraps the filter call.
       expect(() => HyperLogger.info<String>('filtered'), returnsNormally);
     });
 
-    test('subsequent log calls still work after filter throws', () {
+    test('throwing interceptor is skipped; the entry still reaches printer',
+        () {
       final printer = _CountingPrinter();
-      HyperLogger.init(printer: printer, logFilter: _throwingFilter);
+      HyperLogger.init(
+        printer: printer,
+        interceptors: [_throwingInterceptor],
+      );
 
       HyperLogger.info<String>('one');
       HyperLogger.info<String>('two');
       HyperLogger.info<String>('three');
 
-      // All swallowed by try-catch, printer never called because filter
-      // throws before the printer.log() line.
-      expect(printer.callCount, equals(0));
+      // The throwing interceptor is isolated (skipped), so each entry
+      // continues through the rest of the chain and reaches the printer.
+      // This is the documented LogInterceptor failure-isolation contract.
+      expect(printer.callCount, equals(3));
     });
+
+    test(
+      'a later interceptor still runs after an earlier one throws',
+      () {
+        var lateCallCount = 0;
+        final printer = _CountingPrinter();
+        HyperLogger.init(
+          printer: printer,
+          interceptors: [
+            _throwingInterceptor,
+            (e) {
+              lateCallCount++;
+              return e;
+            },
+          ],
+        );
+
+        HyperLogger.info<String>('msg');
+
+        expect(lateCallCount, equals(1));
+        expect(printer.callCount, equals(1));
+      },
+    );
   });
 
   // ── Delegate that throws synchronously ────────────────────────────────────
@@ -252,8 +288,11 @@ void main() {
       expect(throwingPrinter.callCount, equals(100));
     });
 
-    test('100 rapid calls with throwing filter do not cascade', () {
-      HyperLogger.init(printer: _CountingPrinter(), logFilter: _throwingFilter);
+    test('100 rapid calls with throwing interceptor do not cascade', () {
+      HyperLogger.init(
+        printer: _CountingPrinter(),
+        interceptors: [_throwingInterceptor],
+      );
 
       for (var i = 0; i < 100; i++) {
         expect(() => HyperLogger.info<String>('rapid $i'), returnsNormally);

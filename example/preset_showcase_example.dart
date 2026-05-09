@@ -1,26 +1,44 @@
 // ignore_for_file: avoid_print
 import 'package:hyper_logger/hyper_logger.dart';
-import 'package:hyper_logger/src/platform/environment_detector.dart';
 
-/// Run: dart run example/demo.dart
-/// Or from repo root: dart run packages/hyper_logger/example/demo.dart
+/// Run: dart run example/preset_showcase_example.dart
 void main() {
   _section('AUTOMATIC PRESET (best-effort environment detection)');
-  print('  Detected environment: ${const EnvironmentDetector().detect().name}');
+  final detected = const EnvironmentDetector().detect();
+  print('  Detected: $detected');
   print('');
   _demoPrinter(LogPrinterPresets.automatic());
 
-  _section('TERMINAL PRESET (emoji + box + bg colors + prefix)');
+  _section('TERMINAL PRESET (full real-terminal: emoji + box + color)');
   _demo(LogPrinterPresets.terminal());
 
-  _section('IDE PRESET (emoji + prefix, no ANSI)');
-  _demo(LogPrinterPresets.ide());
+  _section(
+    'HUMAN(ansi+pipe) — IDE Run Console shape '
+    '(emoji + color + prefix, no box)',
+  );
+  _demo(
+    LogPrinterPresets.human(
+      const TerminalCapabilities(ansi: true, tty: false),
+    ),
+  );
+
+  _section(
+    'HUMAN(no ansi) — piped/file shape (timestamp + emoji + prefix)',
+  );
+  _demo(
+    LogPrinterPresets.human(
+      const TerminalCapabilities(ansi: false, tty: false),
+    ),
+  );
 
   _section('CI PRESET (timestamp + prefix, no formatting)');
   _demo(LogPrinterPresets.ci());
 
-  _section('CLOUD RUN PRESET (JSON structured logging)');
-  _jsonDemo(LogPrinterPresets.cloudRun());
+  _section('GCP PRESET (Cloud Logging JSON)');
+  _jsonDemo(LogPrinterPresets.gcp());
+
+  _section('AWS PRESET (CloudWatch JSON)');
+  _awsDemo(LogPrinterPresets.aws());
 
   _section('CUSTOM: emoji + colors, no box');
   _demo(
@@ -71,8 +89,10 @@ void _section(String title) {
 void _demoPrinter(LogPrinter printer) {
   if (printer is ComposablePrinter) {
     _demo(printer);
-  } else if (printer is JsonPrinter) {
+  } else if (printer is GcpJsonPrinter) {
     _jsonDemo(printer);
+  } else if (printer is AwsJsonPrinter) {
+    _awsDemo(printer);
   }
 }
 
@@ -138,26 +158,37 @@ void _demo(ComposablePrinter printer) {
   }
 }
 
-void _jsonDemo(JsonPrinter printer) {
-  final levels = [
-    (LogLevel.debug, 'Debug message', 'MyService', 'fetchData'),
-    (LogLevel.info, 'User logged in successfully', 'AuthBloc', 'onLogin'),
-    (LogLevel.warning, 'Rate limit approaching', 'ApiClient', 'request'),
-    (LogLevel.error, 'Connection failed', 'WebSocket', 'connect'),
-  ];
-
-  for (final (level, msg, cls, method) in levels) {
-    final logMsg = LogMessage(msg, String, method: method);
-    final entry = LogEntry(
-      level: level,
-      message: msg,
-      object: logMsg,
-      loggerName: cls,
-      time: DateTime.now(),
-    );
-    final lines = printer.format(entry);
-    for (final line in lines) {
+void _jsonDemo(GcpJsonPrinter printer) {
+  for (final (level, msg, cls, method) in _jsonLevels) {
+    final entry = _jsonEntry(level, msg, cls, method);
+    for (final line in printer.format(entry)) {
       print(line);
     }
   }
+}
+
+void _awsDemo(AwsJsonPrinter printer) {
+  for (final (level, msg, cls, method) in _jsonLevels) {
+    final entry = _jsonEntry(level, msg, cls, method);
+    for (final line in printer.format(entry)) {
+      print(line);
+    }
+  }
+}
+
+const _jsonLevels = [
+  (LogLevel.debug, 'Debug message', 'MyService', 'fetchData'),
+  (LogLevel.info, 'User logged in successfully', 'AuthBloc', 'onLogin'),
+  (LogLevel.warning, 'Rate limit approaching', 'ApiClient', 'request'),
+  (LogLevel.error, 'Connection failed', 'WebSocket', 'connect'),
+];
+
+LogEntry _jsonEntry(LogLevel level, String msg, String cls, String method) {
+  return LogEntry(
+    level: level,
+    message: msg,
+    object: LogMessage(msg, String, method: method),
+    loggerName: cls,
+    time: DateTime.now(),
+  );
 }

@@ -16,9 +16,6 @@ void main() {
     test('timestamp defaults to false', () => expect(style.timestamp, isFalse));
     test('prefix defaults to true', () => expect(style.prefix, isTrue));
     test('lineLength defaults to 120', () => expect(style.lineLength, 120));
-    test('stackTraceMethodCount defaults to null', () {
-      expect(style.stackTraceMethodCount, isNull);
-    });
     test(
       'levelEmojis defaults to null',
       () => expect(style.levelEmojis, isNull),
@@ -61,11 +58,6 @@ void main() {
     test('lineLength can be changed', () {
       final style = LogStyle()..lineLength = 80;
       expect(style.lineLength, 80);
-    });
-
-    test('stackTraceMethodCount can be set', () {
-      final style = LogStyle()..stackTraceMethodCount = 5;
-      expect(style.stackTraceMethodCount, 5);
     });
 
     test('dateTimeFormatter can be set and called', () {

@@ -17,4 +17,7 @@ class DirectPrinter implements LogPrinter {
   void log(LogEntry entry) {
     output(entry.message);
   }
+
+  @override
+  void dispose() {/* stateless */}
 }

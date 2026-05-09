@@ -6,10 +6,16 @@ import 'package:test/test.dart';
 
 class _RecordingPrinter implements LogPrinter {
   final List<LogEntry> entries = [];
+  int disposeCalls = 0;
 
   @override
   void log(LogEntry entry) {
     entries.add(entry);
+  }
+
+  @override
+  void dispose() {
+    disposeCalls++;
   }
 }
 
@@ -37,7 +43,7 @@ class _RecordingCrashReporting extends CrashReportingDelegate {
 
 List<String> _initCapturing({
   LogMode mode = LogMode.enabled,
-  LogFilter? logFilter,
+  List<LogInterceptor>? interceptors,
   bool captureStackTrace = true,
   bool configureLoggingPackage = true,
   int maxCacheSize = HyperLogger.defaultMaxCacheSize,
@@ -46,7 +52,7 @@ List<String> _initCapturing({
   HyperLogger.init(
     printer: DirectPrinter(output: captured.add),
     mode: mode,
-    logFilter: logFilter,
+    interceptors: interceptors,
     captureStackTrace: captureStackTrace,
     configureLoggingPackage: configureLoggingPackage,
     maxCacheSize: maxCacheSize,
@@ -85,7 +91,7 @@ void main() {
         () => HyperLogger.init(
           printer: DirectPrinter(output: (_) {}),
           mode: LogMode.silent,
-          logFilter: (_) => true,
+          interceptors: [(e) => e],
           captureStackTrace: false,
           configureLoggingPackage: false,
           maxCacheSize: 128,
@@ -123,17 +129,17 @@ void main() {
       expect(captured, isEmpty);
     });
 
-    test('re-init replaces logFilter', () {
-      // First init: filter everything.
-      final captured = _initCapturing(logFilter: (_) => false);
+    test('re-init replaces interceptors', () {
+      // First init: drop everything.
+      final captured = _initCapturing(interceptors: [(_) => null]);
       HyperLogger.info<String>('filtered');
       expect(captured, isEmpty);
 
-      // Second init: allow everything.
+      // Second init: pass everything through.
       captured.clear();
       HyperLogger.init(
         printer: DirectPrinter(output: captured.add),
-        logFilter: (_) => true,
+        interceptors: [(e) => e],
       );
       HyperLogger.info<String>('passed');
       expect(captured, isNotEmpty);
@@ -230,6 +236,21 @@ void main() {
       _initCapturing();
       expect(() => HyperLogger.info<String>('test'), returnsNormally);
     });
+
+    test('disposes the active printer (R10 audit fix)', () {
+      final printer = _RecordingPrinter();
+      HyperLogger.init(printer: printer);
+      expect(printer.disposeCalls, 0);
+
+      HyperLogger.reset();
+
+      expect(
+        printer.disposeCalls,
+        1,
+        reason: 'reset() must dispose the previous printer to avoid '
+            'leaking timers / file handles across test setUp/tearDown',
+      );
+    });
   });
 
   // ── isEnabled() ───────────────────────────────────────────────────────────
@@ -287,6 +308,22 @@ void main() {
       // No init() call — isEnabled should trigger auto-init.
       // Default mode is enabled with root level ALL.
       expect(HyperLogger.isEnabled(LogLevel.info), isTrue);
+    });
+
+    test('setLogLevel before init() persists through implicit init', () {
+      // Round-8 regression case: previously, calling setLogLevel before
+      // any other HyperLogger entry point set
+      // `logging.Logger.root.level` directly without triggering
+      // initialization. The first subsequent log call hit
+      // `_ensureInitialized()`, which calls `init()`, which resets the
+      // root to `Level.ALL` — silently overwriting the level the user
+      // configured. Round-8 fix: setLogLevel triggers init itself.
+      HyperLogger.reset();
+      HyperLogger.setLogLevel(LogLevel.warning);
+      // No `init()` between — the next call must NOT reset to ALL.
+      expect(HyperLogger.isEnabled(LogLevel.info), isFalse,
+          reason: 'setLogLevel before init must persist');
+      expect(HyperLogger.isEnabled(LogLevel.warning), isTrue);
     });
   });
 
@@ -491,28 +528,30 @@ void main() {
     });
   });
 
-  // ── logFilter ─────────────────────────────────────────────────────────────
+  // ── interceptors ──────────────────────────────────────────────────────────
 
-  group('logFilter', () {
-    test('filter returning false suppresses entry', () {
+  group('interceptors', () {
+    test('interceptor returning null drops the entry', () {
       final printer = _RecordingPrinter();
-      HyperLogger.init(printer: printer, logFilter: (_) => false);
+      HyperLogger.init(printer: printer, interceptors: [(_) => null]);
       HyperLogger.info<String>('blocked');
       expect(printer.entries, isEmpty);
     });
 
-    test('filter returning true passes entry', () {
+    test('interceptor returning the entry passes it through', () {
       final printer = _RecordingPrinter();
-      HyperLogger.init(printer: printer, logFilter: (_) => true);
+      HyperLogger.init(printer: printer, interceptors: [(e) => e]);
       HyperLogger.info<String>('allowed');
       expect(printer.entries, hasLength(1));
     });
 
-    test('filter can inspect entry level', () {
+    test('interceptor can drop based on level', () {
       final printer = _RecordingPrinter();
       HyperLogger.init(
         printer: printer,
-        logFilter: (entry) => entry.level.index >= LogLevel.warning.index,
+        interceptors: [
+          (e) => e.level.index >= LogLevel.warning.index ? e : null,
+        ],
       );
       HyperLogger.info<String>('filtered out');
       HyperLogger.warning<String>('passed through');
@@ -523,11 +562,11 @@ void main() {
       expect(printer.entries[1].message, contains('also passed'));
     });
 
-    test('filter can inspect entry loggerName', () {
+    test('interceptor can drop based on loggerName', () {
       final printer = _RecordingPrinter();
       HyperLogger.init(
         printer: printer,
-        logFilter: (entry) => entry.loggerName == 'int',
+        interceptors: [(e) => e.loggerName == 'int' ? e : null],
       );
       HyperLogger.info<int>('allowed');
       HyperLogger.info<String>('blocked');
@@ -536,11 +575,71 @@ void main() {
       expect(printer.entries.first.loggerName, equals('int'));
     });
 
-    test('null logFilter allows everything', () {
+    test('null interceptors allows everything', () {
       final printer = _RecordingPrinter();
-      HyperLogger.init(printer: printer, logFilter: null);
+      HyperLogger.init(printer: printer, interceptors: null);
       HyperLogger.info<String>('no filter');
       expect(printer.entries, hasLength(1));
+    });
+
+    test('interceptor can transform the entry', () {
+      final printer = _RecordingPrinter();
+      HyperLogger.init(
+        printer: printer,
+        interceptors: [
+          (e) => LogEntry(
+            level: e.level,
+            message: '[redacted]',
+            object: e.object,
+            loggerName: e.loggerName,
+            time: e.time,
+            error: e.error,
+            stackTrace: e.stackTrace,
+          ),
+        ],
+      );
+      HyperLogger.info<String>('original message');
+      expect(printer.entries.single.message, equals('[redacted]'));
+    });
+
+    test('interceptors run in order; first null short-circuits the chain', () {
+      final printer = _RecordingPrinter();
+      var secondCalled = false;
+      HyperLogger.init(
+        printer: printer,
+        interceptors: [
+          (_) => null,
+          (e) {
+            secondCalled = true;
+            return e;
+          },
+        ],
+      );
+      HyperLogger.info<String>('msg');
+      expect(printer.entries, isEmpty);
+      expect(secondCalled, isFalse);
+    });
+
+    test('multiple interceptors compose: drop then transform', () {
+      final printer = _RecordingPrinter();
+      HyperLogger.init(
+        printer: printer,
+        interceptors: [
+          (e) => e.level == LogLevel.debug ? null : e,
+          (e) => LogEntry(
+            level: e.level,
+            message: '[wrapped] ${e.message}',
+            object: e.object,
+            loggerName: e.loggerName,
+            time: e.time,
+          ),
+        ],
+      );
+      HyperLogger.debug<String>('dropped');
+      HyperLogger.info<String>('kept');
+      expect(printer.entries, hasLength(1));
+      expect(printer.entries.single.message, contains('[wrapped]'));
+      expect(printer.entries.single.message, contains('kept'));
     });
   });
 

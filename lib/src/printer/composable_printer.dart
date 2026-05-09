@@ -48,6 +48,7 @@ class ComposablePrinter implements LogPrinter {
     int? errorMethodCount,
     List<String> excludePaths = const [],
     bool showAsyncGaps = false,
+    bool? suppressTypeNames,
     this.output = print,
   }) {
     style = LogStyle();
@@ -62,6 +63,8 @@ class ComposablePrinter implements LogPrinter {
         showAsyncGaps: showAsyncGaps,
       ),
       callerExtractor: CallerExtractor(),
+      suppressTypeNames:
+          suppressTypeNames ?? ContentExtractor.defaultSuppressTypeNames,
     );
     _resolver = StyleResolver();
     _renderer = LogRenderer(sectionRenderer: const SectionRenderer());
@@ -82,4 +85,7 @@ class ComposablePrinter implements LogPrinter {
     final extraction = _extractor.extract(entry);
     return _renderer.render(extraction, style, _resolver);
   }
+
+  @override
+  void dispose() {/* stateless extraction/rendering */}
 }

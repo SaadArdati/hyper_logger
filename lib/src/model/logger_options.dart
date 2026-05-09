@@ -20,8 +20,15 @@ class LoggerOptions {
   /// Useful for feature-level or subsystem labeling.
   final String? tag;
 
-  /// Default value for `skipCrashReporting` on [error] calls.
-  /// Individual calls can still override this.
+  /// Default value for `skipCrashReporting` on `error` calls within
+  /// the scope. Individual calls can still override this by passing
+  /// their own non-null value.
+  ///
+  /// Does not affect `fatal` calls — fatal always reports to
+  /// `CrashReportingDelegate.recordError` regardless of this value.
+  /// The semantic is "fatal failures are unrecoverable; the user
+  /// always wants them on their crash dashboard." Use a different
+  /// scope (or detach the delegate) if you need to silence fatals.
   final bool skipCrashReporting;
 
   const LoggerOptions({

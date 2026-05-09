@@ -14,8 +14,8 @@ void main() {
 }
 ```
 
-`reset()` clears everything: the printer, mode, log filter, crash
-reporting delegate, stream subscription, and both internal caches
+`reset()` clears everything: the printer, mode, interceptor chain,
+crash reporting delegate, stream subscription, and both internal caches
 (per-type loggers and scoped logger instances). After `reset()`, the
 next log call will re-initialize with platform defaults.
 
@@ -170,14 +170,17 @@ The `await Future<void>.delayed(Duration.zero)` is important. Delegate
 calls are fire-and-forget async operations. The microtask delay gives
 them a chance to complete before you assert.
 
-## Testing log filters
+## Testing interceptors
 
 ```dart
-test('filter suppresses matching entries', () {
+test('interceptor drops entries below warning', () {
   final printer = RecordingPrinter();
   HyperLogger.init(
     printer: printer,
-    logFilter: (entry) => entry.level.index >= LogLevel.warning.index,
+    interceptors: [
+      (entry) =>
+          entry.level.index >= LogLevel.warning.index ? entry : null,
+    ],
   );
 
   HyperLogger.info<String>('filtered out');
@@ -187,6 +190,11 @@ test('filter suppresses matching entries', () {
   expect(printer.entries.first.message, contains('passed through'));
 });
 ```
+
+Interceptors run in declaration order; the first to return `null`
+short-circuits the chain. A throwing interceptor is skipped (its slot
+in the chain is treated as a pass-through), so one buggy hook can't
+black-hole the pipeline.
 
 ## Mocking scoped loggers
 

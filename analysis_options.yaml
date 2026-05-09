@@ -1,2 +1,16 @@
 include: package:lints/recommended.yaml
 
+# Stricter type-safety language flags. Round-9 audit fix (M11):
+# `recommended.yaml` alone is light for a public library; these add
+# real diagnostic value without producing churn in test/tool files.
+analyzer:
+  language:
+    strict-casts: true
+    strict-inference: true
+    strict-raw-types: true
+
+linter:
+  rules:
+    # Force explicit return types on top-level functions and methods —
+    # they're part of the public API contract.
+    - always_declare_return_types

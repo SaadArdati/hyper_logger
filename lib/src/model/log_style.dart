@@ -7,8 +7,8 @@ typedef DateTimeFormatter = String Function(DateTime);
 /// Mutable property bag that decorators write formatting preferences into.
 ///
 /// All fields have sensible defaults. Decorators accumulate changes onto the
-/// same instance; the [StyleResolver] reads the final state to produce
-/// [ResolvedSectionStyle] / [ResolvedBorderStyle].
+/// same instance; the internal style resolver reads the final state to
+/// produce the per-section/border style records consumed by the renderer.
 class LogStyle {
   /// Whether to draw a box border around the entire log entry.
   bool box = false;
@@ -27,10 +27,6 @@ class LogStyle {
 
   /// Maximum width of a rendered line before wrapping (characters).
   int lineLength = 120;
-
-  /// Number of stack-trace frames to include. `null` means use the logger
-  /// default (typically the full trace).
-  int? stackTraceMethodCount;
 
   /// Override emojis per [LogLevel]. When `null`, the resolver uses its defaults.
   Map<LogLevel, String>? levelEmojis;

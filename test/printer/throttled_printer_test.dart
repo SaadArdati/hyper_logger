@@ -11,6 +11,9 @@ class _RecordingPrinter implements LogPrinter {
   void log(LogEntry entry) {
     entries.add(entry);
   }
+
+  @override
+  void dispose() {}
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -398,6 +401,34 @@ void main() {
         expect(inner.entries.map((e) => e.message), contains('new-window'));
       },
     );
+  });
+
+  // ── Constructor validation ────────────────────────────────────────────────
+
+  group('constructor validation', () {
+    test('maxPerSecond <= 0 throws ArgumentError', () {
+      final inner = _RecordingPrinter();
+      expect(
+        () => ThrottledPrinter(inner, maxPerSecond: 0),
+        throwsArgumentError,
+      );
+      expect(
+        () => ThrottledPrinter(inner, maxPerSecond: -5),
+        throwsArgumentError,
+      );
+    });
+
+    test('maxQueueSize <= 0 throws ArgumentError', () {
+      final inner = _RecordingPrinter();
+      expect(
+        () => ThrottledPrinter(inner, maxQueueSize: 0),
+        throwsArgumentError,
+      );
+      expect(
+        () => ThrottledPrinter(inner, maxQueueSize: -1),
+        throwsArgumentError,
+      );
+    });
   });
 
   // ── Edge cases ────────────────────────────────────────────────────────────

@@ -9,6 +9,7 @@ void main() {
         containsAll([
           SectionKind.message,
           SectionKind.data,
+          SectionKind.context,
           SectionKind.error,
           SectionKind.stackTrace,
           SectionKind.timestamp,
@@ -16,8 +17,8 @@ void main() {
       );
     });
 
-    test('has exactly 5 values', () {
-      expect(SectionKind.values, hasLength(5));
+    test('has exactly 6 values', () {
+      expect(SectionKind.values, hasLength(6));
     });
   });
 

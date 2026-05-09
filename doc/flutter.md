@@ -142,8 +142,8 @@ zoneSpecification: ZoneSpecification(
 ```
 
 This way nothing is silently lost. Third-party `print()` calls show up
-as debug-level entries in your log output, and you can filter them with
-`logFilter` or `minLevel` if they're noisy.
+as debug-level entries in your log output, and you can drop them via
+`interceptors:` or with a `setLogLevel` if they're noisy.
 
 ## Build mode configuration
 

@@ -6,6 +6,12 @@ enum SectionKind {
   /// Structured data attached to the log entry.
   data,
 
+  /// Request-scoped key/value context attached via
+  /// `child(context: {...})`. Rendered inline by `ComposablePrinter` so
+  /// terminal/CI output gets the same correlation fields the cloud
+  /// printers merge into JSON.
+  context,
+
   /// An error or exception object.
   error,
 

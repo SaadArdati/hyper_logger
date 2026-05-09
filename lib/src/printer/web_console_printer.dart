@@ -3,12 +3,14 @@ import 'dart:js_interop';
 
 import 'package:web/web.dart' as web;
 
+import '../extraction/caller_extractor.dart';
 import '../extraction/stack_trace_parser.dart';
 import '../model/log_entry.dart';
 import '../model/log_level.dart';
 import '../model/log_message.dart';
 import '../rendering/style_resolver.dart';
 import 'log_printer.dart';
+import 'logger_name_filter.dart';
 
 // ── Custom @JS bindings ────────────────────────────────────────────────────
 // The standard `package:web` Console bindings only accept a single argument.
@@ -45,15 +47,30 @@ class WebConsolePrinter implements LogPrinter {
   /// [methodCount] when null).
   final int? errorMethodCount;
 
-  late final StackTraceParser _stackParser;
+  /// When `true`, suppresses `Type.toString()` from the label header.
+  /// `dart compile js` minifies type names in release builds while
+  /// leaving `dart.vm.product` as `false` — set this explicitly to
+  /// `true` in production web bundles to avoid `[c8.fn]`-style noise.
+  ///
+  /// Round-9 audit fix (H4): previously the web path always
+  /// interpolated the (potentially-minified) type name into the label.
+  final bool suppressTypeNames;
 
-  WebConsolePrinter({this.methodCount = 8, this.errorMethodCount}) {
+  late final StackTraceParser _stackParser;
+  late final CallerExtractor _callerExtractor;
+
+  WebConsolePrinter({
+    this.methodCount = 8,
+    this.errorMethodCount,
+    this.suppressTypeNames = false,
+  }) {
     _stackParser = StackTraceParser(
       methodCount: methodCount,
       errorMethodCount: errorMethodCount,
       excludePaths: const [],
       showAsyncGaps: false,
     );
+    _callerExtractor = CallerExtractor();
   }
 
   // ── Styling ──────────────────────────────────────────────────────────────
@@ -129,6 +146,16 @@ class WebConsolePrinter implements LogPrinter {
       _logData(message.data!);
     }
 
+    // Round-9 fix: render request-scoped context (`child(context: {...})`)
+    // alongside `data`. Previously only the cloud printers and the
+    // round-8-updated `ComposablePrinter` rendered context — the web
+    // path silently dropped it, so Flutter Web users adopting the
+    // child API would lose `requestId` etc. in DevTools.
+    final context = message.context;
+    if (context != null && context.isNotEmpty) {
+      _logData(context);
+    }
+
     // Exception in red via %c.
     if (entry.error != null) {
       _styledLog('%c${entry.error}'.toJS, _errorCss.toJS);
@@ -149,20 +176,15 @@ class WebConsolePrinter implements LogPrinter {
 
   /// Logs structured data as a native expandable JS object via
   /// `console.dir`, or falls back to JSON text for non-Map data.
+  ///
+  /// Round-9 fix: previously this was shallow — nested maps/lists were
+  /// stringified, so a payload like `{'user': {'id': 42}}` rendered as
+  /// `{user: "{id: 42}"}` and lost the expandable tree exactly when
+  /// users wanted it most. Now recursively converts nested structures
+  /// so DevTools' object-inspector can drill in.
   void _logData(Object data) {
-    if (data is Map) {
-      final jsObj = <String, JSAny?>{};
-      for (final entry in data.entries) {
-        final key = entry.key.toString();
-        final value = entry.value;
-        jsObj[key] = switch (value) {
-          num v => v.toJS,
-          bool v => v.toJS,
-          String v => v.toJS,
-          _ => value.toString().toJS,
-        };
-      }
-      web.console.dir(jsObj.jsify());
+    if (data is Map || data is Iterable) {
+      web.console.dir(_jsify(data));
     } else {
       try {
         final encoder = JsonEncoder.withIndent(
@@ -176,11 +198,41 @@ class WebConsolePrinter implements LogPrinter {
     }
   }
 
+  /// Recursively converts Dart values to JS-friendly forms preserving
+  /// nesting: maps and iterables retain structure; primitives box via
+  /// `.toJS`; everything else stringifies.
+  JSAny? _jsify(Object? value) {
+    if (value == null) return null;
+    if (value is num) return value.toJS;
+    if (value is bool) return value.toJS;
+    if (value is String) return value.toJS;
+    if (value is Map) {
+      final out = <String, JSAny?>{};
+      for (final e in value.entries) {
+        out[e.key.toString()] = _jsify(e.value);
+      }
+      return out.jsify();
+    }
+    if (value is Iterable) {
+      return value.map(_jsify).toList().jsify();
+    }
+    return value.toString().toJS;
+  }
+
   // ── Label ────────────────────────────────────────────────────────────────
 
   /// Builds a concise label for the collapsed group header.
   ///
   /// Format: `<emoji> [Type.method] message`
+  ///
+  /// Round-9 fix: when the user calls `HyperLogger.<level>(...)` without
+  /// a type argument, `loggerName` is `'dynamic'` / `'Object'` / `'Null'`.
+  /// We drop the bracket entirely in that case (matching what the
+  /// terminal `PrefixDecorator` does) and fall back to extracting a
+  /// caller from the captured stack trace via [CallerExtractor], so
+  /// the README's "method extracted from the stack trace automatically"
+  /// pitch is honored on web too. Previously the web path required
+  /// callers to pass `method:` explicitly.
   String _buildLabel(LogLevel level, LogMessage message) {
     final emoji = level.emoji;
     final buffer = StringBuffer();
@@ -189,17 +241,37 @@ class WebConsolePrinter implements LogPrinter {
     }
 
     final runtimeType = message.type.toString();
-    if (runtimeType != 'dynamic' && runtimeType != 'Object') {
-      buffer.write('[$runtimeType');
-      if (message.method != null) {
-        buffer.write('.${message.method}');
+    final hasUsefulType =
+        !suppressTypeNames && !isGenericLoggerName(runtimeType);
+
+    String? method = message.method;
+    String? className = hasUsefulType ? runtimeType : null;
+
+    // If the user didn't provide a method and we have a stack trace
+    // captured by HyperLogger, try to extract the caller info.
+    if (method == null) {
+      final callerStack = message.callerStackTrace;
+      if (callerStack != null) {
+        final info = _callerExtractor.extract(callerStack);
+        if (info != null) {
+          className ??= info.className;
+          method = info.methodName;
+        }
       }
-      buffer.write('] ');
-    } else if (message.method != null) {
-      buffer.write('[${message.method}] ');
+    }
+
+    if (className != null && method != null) {
+      buffer.write('[$className.$method] ');
+    } else if (className != null) {
+      buffer.write('[$className] ');
+    } else if (method != null) {
+      buffer.write('[$method] ');
     }
 
     buffer.write(message.message);
     return buffer.toString();
   }
+
+  @override
+  void dispose() {/* stateless */}
 }

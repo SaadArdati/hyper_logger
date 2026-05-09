@@ -201,8 +201,9 @@ final b = HyperLogger.withOptions<CoffeeTracker>(tag: 'decaf');
 print(identical(a, b)); // false
 ```
 
-The cache key includes all five options: type, mode, minLevel, tag, and
-skipCrashReporting. All five must match for a cache hit.
+The cache key combines the type parameter with all four
+`LoggerOptions` fields: `mode`, `minLevel`, `tag`, and
+`skipCrashReporting`. All five components must match for a cache hit.
 
 This is efficient, but it has a consequence: if you set
 `a.mode = LogMode.disabled`, you just disabled `b` too. Every reference
@@ -223,7 +224,80 @@ If you expected isolated instances, this will surprise you. Each unique
 combination of type + options is one shared instance across your entire
 app.
 
+## Request-scoped child loggers
+
+Where `withOptions<T>(...)` produces a *cached* logger keyed by class +
+options, `child(context: {...})` produces a *fresh* one whose entries
+all carry the supplied key-value context. Use it for unit-of-work
+scopes: HTTP requests, transactions, background jobs.
+
+```dart
+void handleRequest(Request req) {
+  final log = HyperLogger.child<Handler>(context: {'requestId': req.id});
+  log.info('Received');
+  log.info('Authenticated', data: {'userId': req.user.id});
+}
+```
+
+Every entry from `log` carries `requestId`. Cloud-shaped printers
+(`GcpJsonPrinter`, `AwsJsonPrinter`) merge context fields at the JSON
+root so log aggregators can filter and correlate by them.
+
+### Combining class config with context
+
+The cleanest pattern is "class-scoped logger forks per request":
+
+```dart
+class UserService with HyperLoggerMixin<UserService> {
+  @override
+  final scopedLogger = HyperLogger.withOptions<UserService>(tag: 'users');
+
+  void handleRequest(Request req) {
+    final log = child(context: {'requestId': req.id});
+    log.info('Processing');
+    // → 💡 [users] (requestId=...) Processing
+  }
+}
+```
+
+`scopedLogger.child(context: ...)` inherits the class scope's options
+(tag, level, mode, runtime-mutated mode) and merges the new context
+with any context the parent already had.
+
+### Context merge is shallow
+
+`child(context: {...})` copies the parent's context one level deep and
+merges the supplied keys on top. Nested mutable values (a list inside
+the context map, for example) are shared by reference between parent
+and child — mutating one affects the other. Use immutable or
+freshly-constructed values to avoid surprises.
+
+### Mixin precedence rules
+
+`HyperLoggerMixin<T>.child(...)` mirrors `HyperLogger.child<T>(...)`,
+but only when `scopedLogger` is `null`. When the host overrides
+`scopedLogger`, the host owns its configuration — passing inline knobs
+(`tag`, `minLevel`, `mode`, `skipCrashReporting`, `options`) in that
+case throws `AssertionError` in debug builds, so the bug is caught at
+write time rather than later when the override silently loses.
+
+### Top-level `HyperLogger.child<T>`
+
+Same shape as the mixin form, for top-level handlers without a host
+class:
+
+```dart
+final log = HyperLogger.child<Handler>(
+  tag: 'api',
+  minLevel: LogLevel.info,
+  context: {'requestId': req.id},
+);
+```
+
+Pass either `options:` *or* the inline knobs, not both — debug builds
+assert the mutual exclusion.
+
 ## Available methods
 
 `ScopedLoggerApi<T>` provides: `trace`, `debug`, `info`, `warning`,
-`error`, `fatal`, `stopwatch`.
+`error`, `fatal`, `stopwatch`, `child`.

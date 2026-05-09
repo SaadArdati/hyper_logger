@@ -213,24 +213,50 @@ void main() {
       expect(p.style.ansiColors, isFalse);
     });
 
-    test('ide() preset has emoji=true', () {
-      final p = LogPrinterPresets.ide();
+    test('human(ansi+tty) has the full real-terminal style', () {
+      final p = LogPrinterPresets.human(
+        const TerminalCapabilities(ansi: true, tty: true),
+      );
       expect(p.style.emoji, isTrue);
-    });
-
-    test('ide() preset has prefix=true', () {
-      final p = LogPrinterPresets.ide();
+      expect(p.style.box, isTrue);
+      expect(p.style.ansiColors, isTrue);
       expect(p.style.prefix, isTrue);
     });
 
-    test('ide() preset has box=false', () {
-      final p = LogPrinterPresets.ide();
+    test('human(ansi only, no tty) skips box but keeps color', () {
+      // The IDE Run Console shape — ANSI is supported but stdout is a
+      // pipe with unknown column width, so box drawing is unsafe.
+      final p = LogPrinterPresets.human(
+        const TerminalCapabilities(ansi: true, tty: false),
+      );
+      expect(p.style.emoji, isTrue);
       expect(p.style.box, isFalse);
+      expect(p.style.ansiColors, isTrue);
+      expect(p.style.prefix, isTrue);
     });
 
-    test('ide() preset has ansiColors=false', () {
-      final p = LogPrinterPresets.ide();
+    test('human(no ansi, no tty) emits inline timestamps', () {
+      // Pipe-to-file / low-feature shell — no ANSI means no host UI
+      // tracking time, so the timestamp must travel inline.
+      final p = LogPrinterPresets.human(
+        const TerminalCapabilities(ansi: false, tty: false),
+      );
+      expect(p.style.emoji, isTrue);
+      expect(p.style.box, isFalse);
       expect(p.style.ansiColors, isFalse);
+      expect(p.style.prefix, isTrue);
+      expect(p.style.timestamp, isTrue);
+    });
+
+    test('human(no ansi but tty) emits timestamps without color', () {
+      // Rare: a real TTY without ANSI support (basic shell). No color
+      // means no host UI per row, so timestamps inline.
+      final p = LogPrinterPresets.human(
+        const TerminalCapabilities(ansi: false, tty: true),
+      );
+      expect(p.style.ansiColors, isFalse);
+      expect(p.style.box, isFalse);
+      expect(p.style.timestamp, isTrue);
     });
 
     test('preset output callback is forwarded', () {

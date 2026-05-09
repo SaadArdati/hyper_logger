@@ -5,7 +5,7 @@ import 'package:hyper_logger/hyper_logger.dart';
 ///
 /// Run: dart run example/mixin_example.dart
 void main() {
-  HyperLogger.init(printer: LogPrinterPresets.ide());
+  HyperLogger.init(printer: LogPrinterPresets.automatic());
 
   final service = PaymentService();
   service.processPayment('order-123', 49.99);

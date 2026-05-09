@@ -10,6 +10,9 @@ class _RecordingPrinter implements LogPrinter {
   void log(LogEntry entry) {
     entries.add(entry);
   }
+
+  @override
+  void dispose() {}
 }
 
 class _RecordingCrashReporting extends CrashReportingDelegate {
@@ -87,6 +90,82 @@ void main() {
 
       expect(crash.logs, isEmpty);
       expect(crash.errors, isEmpty);
+    });
+  });
+
+  // ── Global mode interaction (round-9 audit fix) ──────────────────────────
+
+  group('global LogMode.disabled vs scoped LogMode.silent', () {
+    // Round-9 audit fix (H1): previously, `ScopedLogger.warning/error/
+    // fatal` in silent mode invoked `fireDelegateSafely(...)` directly
+    // without consulting the global mode. With global = disabled, the
+    // delegate fired anyway — contradicting the documented "scoped mode
+    // can only be more restrictive than the global mode" contract.
+    test('global disabled silences scoped silent warning delegate fire',
+        () async {
+      final crash = _RecordingCrashReporting();
+      HyperLogger.attachServices(crashReporting: crash);
+      HyperLogger.init(mode: LogMode.disabled);
+
+      final scoped = ScopedLogger<String>(
+        options: const LoggerOptions(mode: LogMode.silent),
+      );
+      scoped.warning('w');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(crash.logs, isEmpty,
+          reason: 'global disabled must silence scoped silent delegate '
+              'fire — was firing pre-fix');
+    });
+
+    test('global disabled silences scoped silent error delegate fire',
+        () async {
+      final crash = _RecordingCrashReporting();
+      HyperLogger.attachServices(crashReporting: crash);
+      HyperLogger.init(mode: LogMode.disabled);
+
+      final scoped = ScopedLogger<String>(
+        options: const LoggerOptions(mode: LogMode.silent),
+      );
+      scoped.error('e');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(crash.errors, isEmpty);
+    });
+
+    test('global disabled silences scoped silent fatal delegate fire',
+        () async {
+      final crash = _RecordingCrashReporting();
+      HyperLogger.attachServices(crashReporting: crash);
+      HyperLogger.init(mode: LogMode.disabled);
+
+      final scoped = ScopedLogger<String>(
+        options: const LoggerOptions(mode: LogMode.silent),
+      );
+      scoped.fatal('f');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(crash.errors, isEmpty);
+    });
+
+    test('global silent (not disabled) still allows scoped silent delegates',
+        () async {
+      // Sanity: only `disabled` (the hard shutdown) blocks scoped
+      // delegate fires. Global `silent` permits delegate-only output.
+      final crash = _RecordingCrashReporting();
+      HyperLogger.attachServices(crashReporting: crash);
+      HyperLogger.init(mode: LogMode.silent);
+
+      final scoped = ScopedLogger<String>(
+        options: const LoggerOptions(mode: LogMode.silent),
+      );
+      scoped.warning('w');
+      scoped.error('e');
+      scoped.fatal('f');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(crash.logs, hasLength(1));
+      expect(crash.errors, hasLength(2));
     });
   });
 

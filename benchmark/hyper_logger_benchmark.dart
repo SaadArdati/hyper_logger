@@ -58,8 +58,11 @@ void main() {
     };
   });
 
-  _bench('Preset: ide (emoji + prefix)', () {
-    final p = LogPrinterPresets.ide(output: noop.call);
+  _bench('Preset: human(ansi+pipe) — IDE Run Console shape', () {
+    final p = LogPrinterPresets.human(
+      const TerminalCapabilities(ansi: true, tty: false),
+      output: noop.call,
+    );
     return () {
       final lines = p.format(BenchmarkScenarios.simpleInfo);
       for (int i = 0; i < lines.length; i++) {
@@ -78,8 +81,8 @@ void main() {
     };
   });
 
-  _bench('Preset: cloudRun (JSON)', () {
-    final p = LogPrinterPresets.cloudRun(output: noop.call);
+  _bench('Preset: gcp (JSON)', () {
+    final p = LogPrinterPresets.gcp(output: noop.call);
     return () {
       final lines = p.format(BenchmarkScenarios.simpleInfo);
       for (int i = 0; i < lines.length; i++) {
@@ -112,8 +115,8 @@ void main() {
     };
   });
 
-  _bench('Preset: cloudRun (JSON)', () {
-    final p = LogPrinterPresets.cloudRun(output: noop.call);
+  _bench('Preset: gcp (JSON)', () {
+    final p = LogPrinterPresets.gcp(output: noop.call);
     return () {
       final lines = p.format(BenchmarkScenarios.withData);
       for (int i = 0; i < lines.length; i++) {
@@ -146,8 +149,8 @@ void main() {
     };
   });
 
-  _bench('Preset: cloudRun (JSON)', () {
-    final p = LogPrinterPresets.cloudRun(output: noop.call);
+  _bench('Preset: gcp (JSON)', () {
+    final p = LogPrinterPresets.gcp(output: noop.call);
     return () {
       final lines = p.format(BenchmarkScenarios.withError);
       for (int i = 0; i < lines.length; i++) {
@@ -220,8 +223,8 @@ void main() {
     };
   });
 
-  _bench('Preset: cloudRun (JSON)', () {
-    final p = LogPrinterPresets.cloudRun(output: noop.call);
+  _bench('Preset: gcp (JSON)', () {
+    final p = LogPrinterPresets.gcp(output: noop.call);
     final records = BenchmarkScenarios.varied;
     int idx = 0;
     return () {

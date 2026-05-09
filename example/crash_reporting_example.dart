@@ -9,7 +9,7 @@ import 'package:hyper_logger/hyper_logger.dart';
 void main() async {
   final crashReporter = FakeCrashReporter();
 
-  HyperLogger.init(printer: LogPrinterPresets.ide());
+  HyperLogger.init(printer: LogPrinterPresets.automatic());
   HyperLogger.attachServices(crashReporting: crashReporter);
 
   // This goes to the printer AND crash reporting.

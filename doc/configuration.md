@@ -12,7 +12,9 @@ HyperLogger.init(
   printer: LogPrinterPresets.terminal(),
   mode: LogMode.enabled,
   captureStackTrace: true,
-  logFilter: (entry) => !entry.loggerName.contains('NoisyLib'),
+  interceptors: [
+    (entry) => entry.loggerName.contains('NoisyLib') ? null : entry,
+  ],
 );
 ```
 
@@ -20,7 +22,7 @@ HyperLogger.init(
 |---|---|---|---|
 | `printer` | `LogPrinter?` | auto-detected | The printer to use. See [Custom printers](custom_printers.md). |
 | `mode` | `LogMode` | `enabled` | Global logging mode. See [Log modes](#log-modes). |
-| `logFilter` | `LogFilter?` | `null` | Per-entry filter predicate. See [Log filtering](#log-filtering). |
+| `interceptors` | `List<LogInterceptor>?` | `null` | Filter, redact, enrich, or sample entries before they reach the printer. See [Interceptors](#interceptors). |
 | `captureStackTrace` | `bool` | `true` | Auto-extract caller class and method from the stack trace. Disable for ~700ns savings per call. See [Explicit method names](#explicit-method-names). |
 | `configureLoggingPackage` | `bool` | `true` | Sets `hierarchicalLoggingEnabled` and root level on `package:logging`. Set `false` if another package (Firebase, for example) already manages logging config. |
 | `maxCacheSize` | `int` | `256` | LRU cache size for per-type loggers and scoped logger instances. Increase this if you log from hundreds of different types. |
@@ -42,9 +44,23 @@ HyperLogger.init(printer: LogPrinterPresets.terminal());
 |---|---|---|
 | `automatic()` | Detects environment | Default. Picks the right preset for you. |
 | `terminal()` | Emoji + Box + ANSI color + Prefix | Local development in a terminal |
-| `ide()` | Emoji + Prefix | IDE run consoles (clean, no box clutter) |
+| `human(caps)` | Composed from `TerminalCapabilities` | Custom output streams; dispatch target for `automatic()`'s non-cloud / non-CI cases |
 | `ci()` | Timestamp + Prefix | CI/CD log streams (machine-parseable) |
-| `cloudRun()` | JSON output | Google Cloud Run / Cloud Logging |
+| `gcp()` | JSON output | Google Cloud Logging (Cloud Run, GKE, App Engine, Functions) |
+| `aws()` | JSON output | AWS CloudWatch (Lambda, ECS, EKS) |
+
+`human(caps)` composes by capability:
+
+- ANSI + TTY → emoji + box + color + prefix (the `terminal()` shape)
+- ANSI but no TTY → emoji + color + prefix, **no box** (IDE Run Console:
+  ANSI is supported but column width is unknown)
+- No ANSI → adds an inline timestamp (no host UI showing time per row)
+  + emoji + prefix, no color
+- Width is consumed by the box decorator: `human(caps)` passes
+  `caps.width` (clamped 40–1024) into `BoxDecorator(lineLength: ...)`,
+  so wide terminals get full-width borders and narrow ones get
+  appropriately-sized ones. Falls back to 120 columns when
+  `caps.width` is `null`.
 
 On web platforms, hyper_logger uses `WebConsolePrinter` automatically,
 which outputs to Chrome DevTools with `console.groupCollapsed`, CSS
@@ -55,9 +71,20 @@ lines go. See [Custom printers: Output sinks](custom_printers.md#custom-output-s
 
 ### How `automatic()` detects your environment
 
-Detection runs in this order: Cloud Run, CI, IDE, terminal with ANSI
-support, plain text fallback. The first match wins. This happens once at
-init time, not on every log call.
+Detection runs in this order: GCP managed runtimes (Cloud Run, App
+Engine, Cloud Functions) → AWS managed runtimes (Lambda, ECS, Fargate) →
+CI → human(capabilities). The first match wins. The fall-through `human`
+case is itself capability-driven: it composes a preset from the live
+stdout's ANSI / TTY / column-width support, so a real terminal, an IDE
+Run Console, and a piped-to-file process each get the appropriate
+decorator stack. Detection happens once at init time, not on every log
+call.
+
+IDE-launched processes (IntelliJ Run Configuration, VS Code Run/Debug,
+Android Studio) are detected on macOS via `__CFBundleIdentifier`, which
+the OS sets on child processes of GUI apps. On Linux and Windows there's
+no comparable cross-IDE marker, so Run Configurations there fall through
+to the no-ANSI fallback.
 
 ## Log levels
 
@@ -168,24 +195,42 @@ If you're wondering which to use: `silent` is for production, where you
 want quiet logs but still want to hear about problems. `minLevel` is for
 filtering out noise you genuinely never need to see.
 
-## Log filtering
+## Interceptors
 
 Sometimes you need more control than level filtering gives you. Maybe a
 third-party package logs aggressively at `info` level and you want to
-suppress just its output without affecting your own `info` calls.
+suppress just its output without affecting your own `info` calls. Or you
+want to redact secrets, enrich entries with build metadata, or sample
+high-volume events.
 
-The `logFilter` receives a `LogEntry` before it reaches the printer and
-returns `false` to suppress it:
+Interceptors run in order before the printer sees the entry. Each receives
+a `LogEntry` and returns either the entry (possibly modified) or `null`
+to drop it. The first `null` short-circuits the chain.
 
 ```dart
 HyperLogger.init(
-  logFilter: (entry) {
-    // Suppress noisy Supabase GoTrue messages
-    final name = entry.loggerName.toLowerCase();
-    if (name.contains('gotrue')) return false;
-    if (name.contains('supabase') && name.contains('auth')) return false;
-    return true;
-  },
+  interceptors: [
+    // 1. Drop noisy third-party logs entirely.
+    (entry) {
+      final name = entry.loggerName.toLowerCase();
+      if (name.contains('gotrue')) return null;
+      if (name.contains('supabase') && name.contains('auth')) return null;
+      return entry;
+    },
+
+    // 2. Redact `password=...` and `token=...` from messages.
+    (entry) => LogEntry(
+      level: entry.level,
+      message: entry.message
+          .replaceAll(RegExp(r'password=\S+'), 'password=***')
+          .replaceAll(RegExp(r'token=\S+'), 'token=***'),
+      object: entry.object,
+      loggerName: entry.loggerName,
+      time: entry.time,
+      error: entry.error,
+      stackTrace: entry.stackTrace,
+    ),
+  ],
 );
 ```
 

@@ -114,7 +114,12 @@ void main() {
       expect(entry.loggerName, equals('MyComponent'));
     });
 
-    test('preserves time', () {
+    test('foreign LogRecord without LogMessage preserves record.time', () {
+      // This is the path taken when something logs through `package:logging`
+      // directly without going through HyperLogger. We must preserve
+      // `record.time` (the emit-time the package captured), NOT re-read
+      // the clock at listener time — the listener runs in the zone where
+      // it was registered, which is rarely the caller's zone.
       final logger = logging.Logger('TimeTest');
       logging.LogRecord? captured;
       logger.onRecord.listen((r) => captured = r);
@@ -122,6 +127,18 @@ void main() {
 
       final entry = LogEntry.fromLogRecord(captured!);
       expect(entry.time, equals(captured!.time));
+    });
+
+    test('LogMessage.time wins over record.time when both are present', () {
+      final logger = logging.Logger('MsgTime');
+      logging.LogRecord? captured;
+      logger.onRecord.listen((r) => captured = r);
+
+      final emitTime = DateTime.utc(2099, 1, 1);
+      logger.log(logging.Level.INFO, LogMessage('m', String, time: emitTime));
+
+      final entry = LogEntry.fromLogRecord(captured!);
+      expect(entry.time, equals(emitTime));
     });
 
     test('preserves error and stackTrace', () {

@@ -10,6 +10,9 @@ class _RecordingPrinter implements LogPrinter {
   void log(LogEntry entry) {
     entries.add(entry);
   }
+
+  @override
+  void dispose() {}
 }
 
 class _RecordingCrashReporting extends CrashReportingDelegate {
@@ -35,6 +38,12 @@ class _RecordingCrashReporting extends CrashReportingDelegate {
 /// A recording ScopedLoggerApi that logs all calls to verify delegation.
 class _RecordingScopedLogger implements ScopedLoggerApi<_TestClass> {
   final List<(String, String, Object?, String?)> calls = [];
+
+  @override
+  final Map<String, Object?> context = <String, Object?>{};
+
+  @override
+  ScopedLoggerApi<_TestClass> child({Map<String, Object?>? context}) => this;
 
   @override
   void trace(String msg, {Object? data, String? method}) {
@@ -97,6 +106,17 @@ class _ScopedHost with HyperLoggerMixin<_TestClass> {
   final ScopedLoggerApi<_TestClass> _scoped;
 
   _ScopedHost(this._scoped);
+
+  @override
+  ScopedLoggerApi<_TestClass> get scopedLogger => _scoped;
+}
+
+/// Host whose scope has `skipCrashReporting: true` configured in
+/// LoggerOptions. Used to pin that the mixin's logError does not silently
+/// override that opt-out with its default `false`.
+class _ScopedHostWithSkipOptions with HyperLoggerMixin<_TestClass> {
+  late final ScopedLoggerApi<_TestClass> _scoped =
+      HyperLogger.withOptions<_TestClass>(skipCrashReporting: true);
 
   @override
   ScopedLoggerApi<_TestClass> get scopedLogger => _scoped;
@@ -182,6 +202,33 @@ void main() {
       expect(printer.entries, hasLength(1));
       expect(crash.errors, isEmpty);
     });
+
+    test(
+      'logError honors LoggerOptions.skipCrashReporting when caller does '
+      'not pass an explicit value',
+      () async {
+        // Round-8 regression case: previously `logError` declared
+        // `bool skipCrashReporting = false`, which always sent a
+        // non-null `false` down the chain. ScopedLogger.error resolves
+        // `skipCrashReporting ?? options.skipCrashReporting`, so the
+        // explicit `false` always won — `LoggerOptions.skipCrashReporting:
+        // true` was silently ignored. Round 8 makes the parameter
+        // nullable and forwards null when the caller doesn't pass it.
+        final crash = _RecordingCrashReporting();
+        HyperLogger.attachServices(crashReporting: crash);
+
+        final host = _ScopedHostWithSkipOptions();
+        host.logError('skipped via options');
+        await Future<void>.delayed(Duration.zero);
+
+        // The host's scope was configured with
+        // `LoggerOptions(skipCrashReporting: true)`. The mixin's
+        // `logError` must NOT override that with its default.
+        expect(crash.errors, isEmpty,
+            reason: 'options.skipCrashReporting=true must be honored when '
+                'logError is called without an explicit override');
+      },
+    );
 
     test('logFatal delegates to HyperLogger.fatal', () async {
       final crash = _RecordingCrashReporting();

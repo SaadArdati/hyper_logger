@@ -105,7 +105,10 @@ error context chain. The generic interface can't convey these.
 
 **The metadata-preserving approach:** log through hyper_logger for
 console output, but call Crashlytics directly with the full
-`FlutterErrorDetails`:
+`FlutterErrorDetails`. Use `recordFlutterError` (NOT
+`recordFlutterFatalError`) — most framework errors (overflow, layout
+issues) are non-fatal, and reporting them as fatal inflates your
+Crashlytics crash counts:
 
 ```dart
 FlutterError.onError = (details) {
@@ -116,8 +119,7 @@ FlutterError.onError = (details) {
     skipCrashReporting: true, // Avoid double-reporting
   );
   if (!kDebugMode) {
-    FirebaseCrashlytics.instance
-        .recordFlutterFatalError(details);
+    FirebaseCrashlytics.instance.recordFlutterError(details);
   }
 };
 ```
@@ -126,6 +128,10 @@ FlutterError.onError = (details) {
 Crashlytics only receives the report through the manual call with full
 Flutter metadata. This produces richer crash reports but couples your
 error handler to Crashlytics directly.
+
+Reserve `recordFlutterFatalError` for the cases where Flutter actually
+hands you a fatal — typically platform-channel failures or assertions
+that put the framework in an unrecoverable state.
 
 Async errors don't have this trade-off. `PlatformDispatcher` errors are
 just an exception and a stack trace, which the generic delegate handles
@@ -180,7 +186,10 @@ void main() {
         );
       }
 
-      // Flutter framework errors: manual Crashlytics call for full metadata
+      // Flutter framework errors: manual Crashlytics call for full metadata.
+      // Use `recordFlutterError` for non-fatal cases (overflow, layout
+      // glitches) — `recordFlutterFatalError` should only fire on
+      // genuinely-unrecoverable framework failures.
       FlutterError.onError = (details) {
         HyperLogger.error<FlutterError>(
           details.exceptionAsString(),
@@ -189,8 +198,7 @@ void main() {
           skipCrashReporting: true,
         );
         if (!kDebugMode) {
-          FirebaseCrashlytics.instance
-              .recordFlutterFatalError(details);
+          FirebaseCrashlytics.instance.recordFlutterError(details);
         }
       };
 
@@ -216,6 +224,12 @@ void main() {
   );
 }
 ```
+
+> **Note on the `print` zone override:** this catches stray `print()`
+> calls from packages in your dependency graph that bypass
+> hyper_logger's pipeline. hyper_logger's own output is already
+> suppressed by `LogMode.silent` in release — the override is purely
+> for third-party packages.
 
 See [example/crash_reporting_example.dart](../example/crash_reporting_example.dart)
 for a simpler runnable demo.
