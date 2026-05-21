@@ -1,3 +1,5 @@
+import 'package:meta/meta.dart';
+
 import '../decorators/ansi_color_decorator.dart';
 import '../decorators/box_decorator.dart';
 import '../decorators/emoji_decorator.dart';
@@ -21,7 +23,9 @@ import 'log_printer.dart';
 /// | [gcp]       | [GcpJsonPrinter]    | Google Cloud Logging                     |
 /// | [aws]       | [AwsJsonPrinter]    | AWS CloudWatch / Lambda                  |
 /// | [azure]     | [AzureJsonPrinter]  | Azure App Service / Functions / Container Apps |
-extension LogPrinterPresets on LogPrinter {
+final class LogPrinterPresets {
+  const LogPrinterPresets._();
+
   /// Detects the current [RuntimeEnvironment] and returns the best printer.
   ///
   /// Detection order: GCP → AWS → Azure → CI → human (capability-
@@ -30,13 +34,13 @@ extension LogPrinterPresets on LogPrinter {
   /// This is the default when [HyperLogger.init] is called without an
   /// explicit printer on native platforms.
   ///
-  /// The `default` arm exists because [RuntimeEnvironment] is no
-  /// longer `sealed` — a future leaf added in a later release would
-  /// otherwise produce a non-exhaustive switch. We fall back to a
-  /// human preset built from the current stdout's capabilities, which
-  /// is a reasonable best-effort for unknown environments.
+  /// The `default` arm exists because [RuntimeEnvironment] is not
+  /// `sealed` — a future leaf added in a later release would otherwise
+  /// produce a non-exhaustive switch. The fallback is a human preset
+  /// built from the current stdout's capabilities, which is a
+  /// reasonable best-effort for unknown environments.
   static LogPrinter automatic({LogOutput? output}) {
-    final env = const EnvironmentDetector().detect();
+    final env = _cachedEnvironment ??= const EnvironmentDetector().detect();
     return switch (env) {
       GcpEnvironment() => gcp(output: output),
       AwsEnvironment() => aws(output: output),
@@ -48,6 +52,20 @@ extension LogPrinterPresets on LogPrinter {
       ),
       _ => human(EnvironmentDetector.detectCapabilities(), output: output),
     };
+  }
+
+  /// Cached [EnvironmentDetector.detect] result. The runtime environment
+  /// doesn't change over a process's lifetime, so a repeated
+  /// [automatic] call can reuse the first detection.
+  static RuntimeEnvironment? _cachedEnvironment;
+
+  /// Resets the cached environment-detection result. Test-only — tests
+  /// that toggle process env vars (`GCP_PROJECT`, `AWS_REGION`, etc.)
+  /// to exercise the dispatch matrix must clear the cache between
+  /// permutations.
+  @visibleForTesting
+  static void resetEnvironmentCache() {
+    _cachedEnvironment = null;
   }
 
   /// Builds a human-readable preset by composing decorators based on

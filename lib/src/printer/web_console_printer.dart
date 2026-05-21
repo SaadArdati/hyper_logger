@@ -51,9 +51,6 @@ class WebConsolePrinter implements LogPrinter {
   /// `dart compile js` minifies type names in release builds while
   /// leaving `dart.vm.product` as `false` — set this explicitly to
   /// `true` in production web bundles to avoid `[c8.fn]`-style noise.
-  ///
-  /// Round-9 audit fix (H4): previously the web path always
-  /// interpolated the (potentially-minified) type name into the label.
   final bool suppressTypeNames;
 
   late final StackTraceParser _stackParser;
@@ -146,11 +143,10 @@ class WebConsolePrinter implements LogPrinter {
       _logData(message.data!);
     }
 
-    // Round-9 fix: render request-scoped context (`child(context: {...})`)
-    // alongside `data`. Previously only the cloud printers and the
-    // round-8-updated `ComposablePrinter` rendered context — the web
-    // path silently dropped it, so Flutter Web users adopting the
-    // child API would lose `requestId` etc. in DevTools.
+    // Render request-scoped context (`child(context: {...})`) alongside
+    // `data` so Flutter Web users adopting the child API see
+    // `requestId` etc. in DevTools — parity with the cloud printers
+    // and `ComposablePrinter`.
     final context = message.context;
     if (context != null && context.isNotEmpty) {
       _logData(context);
@@ -176,45 +172,56 @@ class WebConsolePrinter implements LogPrinter {
 
   /// Logs structured data as a native expandable JS object via
   /// `console.dir`, or falls back to JSON text for non-Map data.
-  ///
-  /// Round-9 fix: previously this was shallow — nested maps/lists were
-  /// stringified, so a payload like `{'user': {'id': 42}}` rendered as
-  /// `{user: "{id: 42}"}` and lost the expandable tree exactly when
-  /// users wanted it most. Now recursively converts nested structures
-  /// so DevTools' object-inspector can drill in.
+  /// Nested maps and iterables retain their tree shape so DevTools'
+  /// object inspector can drill in.
   void _logData(Object data) {
     if (data is Map || data is Iterable) {
-      web.console.dir(_jsify(data));
+      web.console.dir(_jsify(data, <Object>{}));
     } else {
       try {
-        final encoder = JsonEncoder.withIndent(
-          '  ',
-          (object) => object.toString(),
-        );
-        web.console.log(encoder.convert(data).toJS);
+        web.console.log(_dataEncoder.convert(data).toJS);
       } catch (_) {
         web.console.log(data.toString().toJS);
       }
     }
   }
 
+  static final JsonEncoder _dataEncoder = JsonEncoder.withIndent(
+    '  ',
+    (object) => object.toString(),
+  );
+
   /// Recursively converts Dart values to JS-friendly forms preserving
   /// nesting: maps and iterables retain structure; primitives box via
   /// `.toJS`; everything else stringifies.
-  JSAny? _jsify(Object? value) {
+  ///
+  /// `seen` tracks Map/Iterable instances on the current descent path.
+  /// A back-reference renders as the literal string `"<cycle>"` so a
+  /// self-referencing payload doesn't stack-overflow the tab.
+  JSAny? _jsify(Object? value, Set<Object> seen) {
     if (value == null) return null;
     if (value is num) return value.toJS;
     if (value is bool) return value.toJS;
     if (value is String) return value.toJS;
     if (value is Map) {
-      final out = <String, JSAny?>{};
-      for (final e in value.entries) {
-        out[e.key.toString()] = _jsify(e.value);
+      if (!seen.add(value)) return '<cycle>'.toJS;
+      try {
+        final out = <String, JSAny?>{};
+        for (final e in value.entries) {
+          out[e.key.toString()] = _jsify(e.value, seen);
+        }
+        return out.jsify();
+      } finally {
+        seen.remove(value);
       }
-      return out.jsify();
     }
     if (value is Iterable) {
-      return value.map(_jsify).toList().jsify();
+      if (!seen.add(value)) return '<cycle>'.toJS;
+      try {
+        return value.map((v) => _jsify(v, seen)).toList().jsify();
+      } finally {
+        seen.remove(value);
+      }
     }
     return value.toString().toJS;
   }
@@ -225,14 +232,12 @@ class WebConsolePrinter implements LogPrinter {
   ///
   /// Format: `<emoji> [Type.method] message`
   ///
-  /// Round-9 fix: when the user calls `HyperLogger.<level>(...)` without
-  /// a type argument, `loggerName` is `'dynamic'` / `'Object'` / `'Null'`.
-  /// We drop the bracket entirely in that case (matching what the
-  /// terminal `PrefixDecorator` does) and fall back to extracting a
-  /// caller from the captured stack trace via [CallerExtractor], so
-  /// the README's "method extracted from the stack trace automatically"
-  /// pitch is honored on web too. Previously the web path required
-  /// callers to pass `method:` explicitly.
+  /// When `HyperLogger.<level>(...)` is called without a type argument,
+  /// `loggerName` is the placeholder `'dynamic'` / `'Object'` / `'Null'`;
+  /// the bracket is dropped (matching `PrefixDecorator`) and a caller
+  /// is extracted from the captured stack trace via [CallerExtractor]
+  /// so the "method extracted from stack trace" behavior is honored
+  /// on web too.
   String _buildLabel(LogLevel level, LogMessage message) {
     final emoji = level.emoji;
     final buffer = StringBuffer();

@@ -7,9 +7,8 @@ import 'package:hyper_logger/hyper_logger.dart';
 ///
 /// Run: dart run example/file_logger_example.dart
 ///
-/// Demonstrates the v0.2 marquee feature: an append-only file printer
-/// with size-based rotation, retention, and gzip compression of older
-/// rotated files.
+/// An append-only file printer with size-based rotation, retention,
+/// and gzip compression of older rotated files.
 Future<void> main() async {
   // Use a temp dir so the example is self-cleaning.
   final tempDir = Directory.systemTemp.createTempSync('hyper_logger_example_');

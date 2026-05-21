@@ -26,6 +26,12 @@ abstract interface class ScopedLoggerApi<T> {
   /// avoid surprises.
   ScopedLoggerApi<T> child({Map<String, Object?>? context});
 
+  /// The current operating mode. Mutable so feature flags can toggle
+  /// scoped output at runtime; setting it does not affect the global
+  /// [HyperLogger] mode.
+  LogMode get mode;
+  set mode(LogMode value);
+
   void trace(String msg, {Object? data, String? method});
 
   void debug(String msg, {Object? data, String? method});
@@ -71,8 +77,7 @@ class ScopedLogger<T> implements ScopedLoggerApi<T> {
   /// The options this scope was created with.
   final LoggerOptions options;
 
-  /// The current operating mode. Initialized from [LoggerOptions.mode]
-  /// but can be changed at runtime for feature-flag toggling.
+  @override
   LogMode mode;
 
   @override
@@ -101,17 +106,16 @@ class ScopedLogger<T> implements ScopedLoggerApi<T> {
     return tag != null ? '[$tag] $msg' : msg;
   }
 
-  /// The merged context map to pass to [HyperLogger] statics, or `null` when
+  /// The context map to pass to [HyperLogger] statics, or `null` when
   /// empty.
   ///
-  /// Returns a defensive shallow copy so subsequent mutations of
-  /// `this.context` don't retroactively change `LogMessage.context` on
-  /// already-emitted entries. The shallow nature means nested mutable
-  /// values are still shared by reference — that's documented on
-  /// `child(context: ...)` as the trade-off (deep copy would force
-  /// callers to round-trip every value through JSON).
-  Map<String, Object?>? get _ctx =>
-      context.isEmpty ? null : Map<String, Object?>.of(context);
+  /// Returns the live map by reference to avoid a per-emit allocation
+  /// on hot logging paths. Printers and interceptors treat the map as
+  /// read-only and finish their work synchronously, so the contract
+  /// is: mutate [context] before logging, not after. The cached
+  /// `HyperLogger.withOptions` instance already documents context
+  /// mutation as a footgun; use [child] for per-request context.
+  Map<String, Object?>? get _ctx => context.isEmpty ? null : context;
 
   /// Returns `true` if the message should be fully suppressed (no delegates).
   bool _suppressed(LogLevel level) {
@@ -166,13 +170,9 @@ class ScopedLogger<T> implements ScopedLoggerApi<T> {
   void warning(String msg, {Object? data, String? method}) {
     if (_suppressed(LogLevel.warning)) return;
     if (mode == LogMode.silent) {
-      // Round-9 audit fix: honor the global mode here. Without this,
-      // `LogMode.disabled` at the global level was bypassed by the
-      // scoped silent path and delegates still fired — contradicting
-      // the documented "scoped mode can only be more restrictive than
-      // the global mode" contract. We only fire the delegate when
-      // the global mode would have allowed delegates too (i.e.
-      // anything except `disabled`).
+      // Honor the global mode in the silent path: scoped mode can only
+      // be more restrictive than global, never less. When global is
+      // `disabled` we must not fire the delegate either.
       if (HyperLogger.mode == LogMode.disabled) return;
       fireDelegateSafely(() => HyperLogger.crashReporting?.log(_tagged(msg)));
       return;
@@ -204,8 +204,7 @@ class ScopedLogger<T> implements ScopedLoggerApi<T> {
     final tagged = _tagged(message);
     final skip = skipCrashReporting ?? options.skipCrashReporting;
     if (mode == LogMode.silent) {
-      // Round-9 audit fix: honor the global mode in the silent path
-      // (see warning() comment for rationale).
+      // Honor the global mode (see warning() above for rationale).
       if (HyperLogger.mode == LogMode.disabled) return;
       if (!skip) {
         fireDelegateSafely(
@@ -250,8 +249,7 @@ class ScopedLogger<T> implements ScopedLoggerApi<T> {
     if (_suppressed(LogLevel.fatal)) return;
     final tagged = _tagged(message);
     if (mode == LogMode.silent) {
-      // Round-9 audit fix: honor the global mode in the silent path
-      // (see warning() comment for rationale).
+      // Honor the global mode (see warning() above for rationale).
       if (HyperLogger.mode == LogMode.disabled) return;
       fireDelegateSafely(
         () => HyperLogger.crashReporting?.recordError(

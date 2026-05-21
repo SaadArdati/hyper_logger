@@ -49,9 +49,9 @@ class LogMessage {
   final DateTime? time;
 
   /// The tag from `LoggerOptions.tag` if this entry came through a
-  /// tagged [ScopedLogger]. Round-9 audit fix (M14/L13): exposed so
-  /// interceptors can match on it programmatically without parsing
-  /// the `[tag] ` prefix back out of [message].
+  /// tagged [ScopedLogger]. Exposed so interceptors can match on it
+  /// programmatically without parsing the `[tag] ` prefix back out
+  /// of [message].
   final String? scopeTag;
 
   const LogMessage(

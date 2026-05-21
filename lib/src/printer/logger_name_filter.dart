@@ -7,9 +7,6 @@
 /// the package is broken. The cloud printers and the default file
 /// formatter use this helper to drop the field when there's nothing
 /// meaningful to put in it.
-///
-/// Round-9 fix: previously each printer rendered the raw `loggerName`
-/// even when it was the placeholder.
 bool isGenericLoggerName(String name) {
   return name == 'dynamic' || name == 'Object' || name == 'Null';
 }

@@ -35,15 +35,10 @@ class LogEntry {
   /// The scope tag from `LoggerOptions.tag`, if a [ScopedLogger] with a
   /// non-null tag emitted this record.
   ///
-  /// Round-9 audit fix (M14/L13): previously the tag was only baked
-  /// into the `message` string as `[tag] message`, which meant
-  /// interceptors and custom printers had to parse the prefix back
-  /// out. The tag is now also surfaced as its own field so consumers
-  /// can match on it programmatically.
-  ///
-  /// `message` still includes the `[tag] ` prefix for backwards
-  /// compatibility with existing printer formatters; this field
-  /// duplicates the value for cleaner consumption.
+  /// Surfaced as its own field so interceptors and custom printers
+  /// can match on tag programmatically; [message] still carries the
+  /// `[tag] ` prefix so existing printer formatters that read `message`
+  /// directly keep working.
   final String? tag;
 
   const LogEntry({

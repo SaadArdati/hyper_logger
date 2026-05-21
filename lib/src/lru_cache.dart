@@ -20,9 +20,7 @@ class LruCache<K, V> {
   final int maxSize;
   final LinkedHashMap<K, V> _map = LinkedHashMap<K, V>();
 
-  /// Current number of cached entries. Round-9 audit fix (L10): the
-  /// previous API exposed only [putIfAbsent] / [clear], so callers
-  /// (and tests) had no way to introspect cache size.
+  /// Current number of cached entries.
   int get length => _map.length;
 
   /// Returns the cached value for [key] without promoting it. Returns

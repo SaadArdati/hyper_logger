@@ -1,8 +1,8 @@
-// Core API
+// Core API.
 //
 // `hyper_logger_base.dart` re-exports `ScopedLogger` and `ScopedLoggerApi`
-// via the `part 'scoped_logger.dart';` directive (round-10b refactor —
-// makes `_logScoped` truly library-private).
+// through a `part 'scoped_logger.dart';` directive so that the dispatch
+// helper they share with `HyperLogger` can stay library-private.
 export 'src/hyper_logger_base.dart';
 export 'src/hyper_logger_mixin.dart';
 

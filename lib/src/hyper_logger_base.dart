@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:clock/clock.dart';
 import 'package:logging/logging.dart' as logging;
+import 'package:meta/meta.dart';
 
 import 'delegates/crash_reporting_delegate.dart';
 import 'delegates/delegate_safety.dart';
@@ -140,10 +141,9 @@ class HyperLogger {
     }
     _mode = mode;
     _captureStackTrace = captureStackTrace;
-    // Round-9 audit fix (M6): dispose the previous printer when
-    // replacing it. Without this, swapping in a fresh printer would
-    // leak resources held by the old one (notably ThrottledPrinter's
-    // drain Timer or RotatingFilePrinter's file handle).
+    // Dispose the previous printer before swapping it out, otherwise
+    // resources it owns (ThrottledPrinter's drain Timer,
+    // RotatingFilePrinter's file handle) leak.
     final newPrinter =
         printer ?? (_initialized ? _printer : null) ?? createDefaultPrinter();
     if (_initialized && _printer != null && !identical(_printer, newPrinter)) {
@@ -167,20 +167,16 @@ class HyperLogger {
       _initialized = true;
       if (configureLoggingPackage) {
         logging.hierarchicalLoggingEnabled = true;
-        // Round-9 audit fix (M4): if the user pre-configured the
-        // level via setLogLevel BEFORE init, honor it instead of
-        // resetting to Level.ALL (which would silently undo their
-        // setting).
+        // Honor a level set via setLogLevel before init; otherwise
+        // open the gate fully.
         logging.Logger.root.level =
             _pendingLogLevel?.toLoggingLevel() ?? logging.Level.ALL;
       }
-      // Round-10 audit fix: clear the pending level on the init
-      // transition regardless of `configureLoggingPackage`. When the
-      // user opts out of `package:logging` configuration, they're
-      // managing `Logger.root.level` themselves; a stale pending value
-      // would otherwise apply on a later `init()` with the default
-      // `configureLoggingPackage: true` and silently override their
-      // direct `Logger.root.level` writes.
+      // Always clear the pending level on the init transition. When
+      // the user opts out of `package:logging` configuration they're
+      // managing `Logger.root.level` themselves; a leftover pending
+      // value would otherwise apply on a later default-config init()
+      // and silently overwrite their direct setting.
       _pendingLogLevel = null;
       _subscription = logging.Logger.root.onRecord.listen(_handleLogRecord);
     }
@@ -207,6 +203,7 @@ class HyperLogger {
   /// (which guard the invocation with [fireDelegateSafely]) rather
   /// than holding a long-lived reference — a later [attachServices]
   /// call may replace the delegate.
+  @internal
   static CrashReportingDelegate? get crashReporting => _crashReporting;
 
   /// Detaches all service delegates. Intended for test teardown.
@@ -214,25 +211,17 @@ class HyperLogger {
     _crashReporting = null;
   }
 
-  /// The current global [LogMode]. Read by [ScopedLogger] to honor the
-  /// "global ceiling" contract — when global is `LogMode.disabled`,
+  /// The current global [LogMode]. Exposed so [ScopedLogger] can honor
+  /// the "global ceiling" contract — when global is `LogMode.disabled`,
   /// scoped logs (including the silent-mode delegate fires) must NOT
-  /// invoke crash reporting. Exposed instead of just `_mode` so the
-  /// scoped-logger silent path can check it without crossing the
-  /// private-state boundary.
-  ///
-  /// Round-9 audit fix: previously, `ScopedLogger.error/fatal/warning`
-  /// fired delegates directly via `fireDelegateSafely` while global
-  /// was disabled, against `doc/scoped_loggers.md`'s claim that
-  /// "scoped mode can only be more restrictive than the global mode."
+  /// invoke crash reporting. Scoped mode can only be more restrictive
+  /// than the global mode, never less.
+  @internal
   static LogMode get mode => _mode;
 
   /// Resets all static state. Intended for test teardown so that each test
-  /// starts with a clean slate.
-  ///
-  /// Round-10 audit fix: previously left `_printer` undisposed, which
-  /// leaked the drain `Timer` in [ThrottledPrinter] and the file handle
-  /// in [RotatingFilePrinter] across `setUp`/`tearDown` cycles.
+  /// starts with a clean slate. The current printer is disposed so its
+  /// owned resources (timers, file handles) don't leak across tests.
   static void reset() {
     if (_printer != null) {
       try {
@@ -280,16 +269,11 @@ class HyperLogger {
   /// Child loggers inherit root's level by default, so this call controls
   /// the effective threshold for all loggers.
   ///
-  /// Safe to call before any other [HyperLogger] entry point.
-  ///
-  /// Round-9 audit fix: previously this method called
-  /// [_ensureInitialized] eagerly, which forced `configureLoggingPackage:
-  /// true` on the auto-init even when the user planned to call
-  /// `init(configureLoggingPackage: false)` later. Now it only stores
-  /// the level pre-init, and [init] applies it during the
-  /// `configureLoggingPackage` block — preserving the explicit
-  /// integration boundary for users who want to share `package:logging`
-  /// configuration with another library.
+  /// Safe to call before any other [HyperLogger] entry point: when
+  /// invoked pre-init the level is buffered and applied during the
+  /// first [init] call's `configureLoggingPackage` block, so users
+  /// opting out of `package:logging` configuration retain full
+  /// control of `Logger.root.level`.
   static void setLogLevel(LogLevel level) {
     if (_initialized) {
       logging.Logger.root.level = level.toLoggingLevel();
@@ -657,11 +641,6 @@ class HyperLogger {
   /// Library-private log-with-tag dispatch used by [ScopedLogger] to
   /// thread `LoggerOptions.tag` through to [LogEntry.tag] without
   /// expanding the public static-method surface with a `tag:` parameter.
-  ///
-  /// Round-10b refactor: was previously a public static annotated
-  /// `@internal`, which made it lint-discouraged but still callable
-  /// from outside. Moved [ScopedLogger] into this library via `part`
-  /// so this method can be truly library-private.
   static void _logScoped<T>(
     LogLevel level,
     String message, {
@@ -713,6 +692,12 @@ class HyperLogger {
     Map<String, Object?>? context,
     String? scopeTag,
   }) {
+    final logger = _getLogger<T>();
+    // Gate the heavy work (StackTrace.current capture, LogMessage
+    // allocation) behind the level filter — `logger.log` would drop
+    // the record otherwise, and a filtered-out debug call shouldn't
+    // pay the cost.
+    if (!logger.isLoggable(level)) return;
     // Skip the expensive StackTrace.current capture when method is already
     // provided or when capture is disabled via init(captureStackTrace: false).
     final callerStack = _captureStackTrace && method == null
@@ -733,7 +718,6 @@ class HyperLogger {
       time: clock.now(),
       scopeTag: scopeTag,
     );
-    final logger = _getLogger<T>();
     // Pass logMessage as the message parameter (Object?). The logging package
     // will set record.object = logMessage and record.message = logMessage.toString().
     logger.log(level, logMessage, error, stackTrace);
@@ -748,7 +732,7 @@ class HyperLogger {
   /// printer never crashes the app.
   static void _handleLogRecord(logging.LogRecord record) {
     if (_mode != LogMode.enabled) return;
-    LogEntry? entry;
+    LogEntry entry;
     try {
       entry = LogEntry.fromLogRecord(record);
     } catch (e, st) {
@@ -757,7 +741,7 @@ class HyperLogger {
     }
     for (final interceptor in _interceptors) {
       try {
-        final next = interceptor(entry!);
+        final next = interceptor(entry);
         if (next == null) return; // Explicit drop short-circuits the chain.
         entry = next;
       } catch (e, st) {
@@ -766,7 +750,7 @@ class HyperLogger {
       }
     }
     try {
-      _printer?.log(entry!);
+      _printer?.log(entry);
     } catch (e, st) {
       // Logging should never crash the app.
       _reportPipelineError('printer.log', e, st);
@@ -775,12 +759,9 @@ class HyperLogger {
 
   /// Reports a pipeline error via [_pipelineErrorHandler] when set, with
   /// rate limiting (one report per source per session) so a buggy
-  /// printer can't itself spam.
-  ///
-  /// Round-9 audit fix (M5): previously every catch in `_handleLogRecord`
-  /// silently dropped the record. Users had no signal that they were
-  /// losing data. Now the optional callback fires once per failure
-  /// source so production diagnostics can pick up pipeline failures.
+  /// printer can't itself spam. Sources are coarse-grained tags like
+  /// `printer.log`, `interceptor`, `LogEntry.fromLogRecord` — enough for
+  /// production observability without surfacing internal detail.
   static void _reportPipelineError(
     String source,
     Object error,

@@ -1,0 +1,6 @@
+benchmark/
+tool/
+coverage/
+firebase-debug.log
+*.iml
+.idea/

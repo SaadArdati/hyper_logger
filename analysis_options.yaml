@@ -1,8 +1,8 @@
 include: package:lints/recommended.yaml
 
-# Stricter type-safety language flags. Round-9 audit fix (M11):
-# `recommended.yaml` alone is light for a public library; these add
-# real diagnostic value without producing churn in test/tool files.
+# Stricter type-safety flags. `recommended.yaml` alone is light for a
+# public library; these three add real diagnostic value without
+# producing churn in test/tool files.
 analyzer:
   language:
     strict-casts: true

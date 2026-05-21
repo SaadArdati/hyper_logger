@@ -40,11 +40,10 @@ class ContentExtractor {
   /// `dart.vm.product` is set (Flutter `--release`, `dart compile exe
   /// --release`).
   ///
-  /// Caveat (round-9 audit fix H4): the flag is unreliable on
-  /// `dart compile js` builds — pure-Dart web release builds may
-  /// minify type names while leaving `dart.vm.product` as `false`.
-  /// Construct your printer with an explicit `suppressTypeNames: true`
-  /// when targeting web.
+  /// Caveat: the flag is unreliable on `dart compile js` builds —
+  /// pure-Dart web release builds may minify type names while leaving
+  /// `dart.vm.product` as `false`. Construct your printer with an
+  /// explicit `suppressTypeNames: true` when targeting web.
   static const bool defaultSuppressTypeNames = bool.fromEnvironment(
     'dart.vm.product',
   );
@@ -82,12 +81,10 @@ class ContentExtractor {
       }
 
       // ── context section ──────────────────────────────────────────────────
-      // Round-8 fix: previously the request-scoped `context` map (set
-      // via `child(context: {...})`) was only observable on cloud
-      // printers — terminal/CI output silently dropped it. The README
-      // and `LogMessage.context` doc both implied terminal printers
-      // would render it inline, so users adopting the child API were
-      // surprised. Render as JSON for consistency with `data`.
+      // Render the request-scoped context map (set via
+      // `child(context: {...})`) as JSON, parallel to `data`. Cloud
+      // printers also render it; terminal/CI parity is required so
+      // users adopting the child API see `requestId` etc. everywhere.
       final context = object.context;
       if (context != null && context.isNotEmpty) {
         sections.add(LogSection(SectionKind.context, _formatData(context)));
@@ -166,17 +163,18 @@ class ContentExtractor {
   List<String> _formatData(Object data) {
     if (data is Map || data is Iterable) {
       try {
-        final encoder = JsonEncoder.withIndent(
-          '  ',
-          (o) => o.toString(), // fallback for non-encodable values
-        );
-        return _splitLines(encoder.convert(data));
+        return _splitLines(_dataEncoder.convert(data));
       } catch (_) {
         return [data.toString()];
       }
     }
     return [data.toString()];
   }
+
+  static final JsonEncoder _dataEncoder = JsonEncoder.withIndent(
+    '  ',
+    (o) => o.toString(),
+  );
 
   /// Splits [s] by newlines, with a fast path for the common single-line case.
   ///

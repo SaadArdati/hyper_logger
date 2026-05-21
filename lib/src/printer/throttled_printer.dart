@@ -87,8 +87,16 @@ class ThrottledPrinter implements LogPrinter {
     _scheduleDrain();
   }
 
-  /// Immediately flushes all queued entries, ignoring the rate limit.
-  /// Useful for shutdown or crash scenarios where you want everything out.
+  /// Immediately flushes all queued entries to the wrapped printer,
+  /// ignoring the rate limit. Useful before shutdown or in crash
+  /// scenarios where you want everything out.
+  ///
+  /// Synchronous: returns as soon as the queue has been pumped into
+  /// [inner]. If [inner] is async (e.g. a [RotatingFilePrinter] whose
+  /// path hasn't resolved yet) entries are accepted by `inner.log`
+  /// but may not be durable on disk until the wrapped printer's own
+  /// `close()` / `flush()` resolves. For shutdown durability, call
+  /// the wrapped printer's async drain afterward.
   void flush() {
     _drainTimer?.cancel();
     _drainTimer = null;
@@ -99,12 +107,9 @@ class ThrottledPrinter implements LogPrinter {
   }
 
   /// Cancels the in-flight drain timer (no-op if none is scheduled)
-  /// and disposes the wrapped inner printer.
-  ///
-  /// Round-9 audit fix (M6): without this, replacing the global
-  /// printer via `HyperLogger.init(printer: ...)` would leak the
-  /// drain `Timer`, which would keep firing on the orphan instance
-  /// indefinitely.
+  /// and disposes the wrapped inner printer. Required so that
+  /// replacing the global printer via `HyperLogger.init(...)` doesn't
+  /// leak the drain `Timer` on the orphan instance.
   @override
   void dispose() {
     _drainTimer?.cancel();
@@ -145,11 +150,10 @@ class ThrottledPrinter implements LogPrinter {
     // window is at cap. Suppressing it would hide the loss; overshoot
     // is at most one record per window.
     //
-    // Round-9 audit fix (L9): when called from `flush()`, do NOT
-    // consume a budget slot — `flush()` is meant to bypass the rate
-    // limit entirely, and incrementing `_countThisWindow` here would
-    // make the next regular log call after `flush()` hit the cap one
-    // record early.
+    // When called from `flush()` we don't consume a budget slot —
+    // flush is meant to bypass the rate limit entirely, and a
+    // post-flush regular call shouldn't hit the cap one record early
+    // because of the summary line.
     if (consumeBudget) {
       _countThisWindow++;
     }

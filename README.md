@@ -299,7 +299,7 @@ to match the AppInsights `traces` table conventions.
 
 ```yaml
 dependencies:
-  hyper_logger: ^0.2.0
+  hyper_logger: ^0.1.0
 ```
 
 ## Documentation

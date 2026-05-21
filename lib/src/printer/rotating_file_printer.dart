@@ -190,6 +190,16 @@ abstract class RotatingFilePrinter implements LogPrinter {
   /// further [flush] calls return immediately. Records that arrived
   /// before [close] (including those queued before the path resolved)
   /// are flushed to disk first.
+  ///
+  /// **Compression drain cap.** When rotated files are compressed
+  /// (`FileRotationConfig.compress: true`), [close] drains the gzip
+  /// chain up to a bounded number of iterations (100) to guarantee
+  /// termination if compression itself keeps producing new work.
+  /// Reaching the cap is surfaced via `onError` rather than thrown —
+  /// the file handle is still closed and [close] still resolves, but
+  /// some `.gz` outputs may not be on disk. In practice this only
+  /// fires under sustained per-record rotation; normal workloads
+  /// drain in 1–2 iterations.
   Future<void> close();
 
   /// Synchronously triggers `close()` for best-effort cleanup when
@@ -344,10 +354,10 @@ String defaultFileLineFormatter(LogEntry entry) {
     ..write(' [')
     ..write(entry.level.label)
     ..write('] ');
-  // Round-9 fix: drop the placeholder logger name (`dynamic` / `Object`
-  // / `Null`) that appears when a static `HyperLogger.<level>(...)` is
-  // called without `<T>`. Otherwise file output prefixes every line
-  // with `dynamic:` which suggests the package is broken.
+  // Drop the placeholder logger name (`dynamic` / `Object` / `Null`)
+  // that appears when a static `HyperLogger.<level>(...)` is called
+  // without `<T>`, otherwise every line would be prefixed with
+  // `dynamic:`.
   if (!isGenericLoggerName(entry.loggerName)) {
     buf
       ..write(entry.loggerName)

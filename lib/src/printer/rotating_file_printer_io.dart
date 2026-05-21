@@ -42,6 +42,8 @@ class _RotatingFilePrinterIo implements RotatingFilePrinter {
 
   // Resolved state — null until [_initialize] completes successfully.
   String? _path;
+  // Cached rotated-file matcher; compiled lazily from `_path` once.
+  RegExp? _rotatedFilePattern;
   RandomAccessFile? _handle;
   int _bytesWritten = 0;
   DateTime _windowStart = clock.now();
@@ -117,14 +119,12 @@ class _RotatingFilePrinterIo implements RotatingFilePrinter {
       // NOT bail on _closed — close() awaits this future and expects the
       // drain to land before we tear down.
       //
-      // Round-8 fix: track aggregate drain failures so the user can tell
-      // how many entries were lost. With round-7's intentional onError
-      // coalescing during async handlers, each per-entry `_safeOnError`
-      // after the first is suppressed for the duration of the handler's
-      // Future — without an aggregate count, the user sees ONE error
-      // and has no signal that a hundred subsequent records were also
-      // dropped. The summary fires after the loop so the count is
-      // accurate even if the per-entry path got coalesced.
+      // Track aggregate drain failures so the caller can tell how
+      // many entries were lost. Each per-entry `_safeOnError` after
+      // the first is suppressed while an async handler is in-flight
+      // (intentional coalescing to avoid handler reentrancy), so
+      // without this summary the user would see one error and have
+      // no signal that subsequent records were also dropped.
       final initialDropped = _drainFailures(_pending);
       if (initialDropped > 1) {
         _safeOnErrorAfterCurrentHandler(
@@ -153,11 +153,11 @@ class _RotatingFilePrinterIo implements RotatingFilePrinter {
             _safeOnError(e, st);
           }
         } else {
-          // Round-7 fix: if the drain itself lost the handle (a
-          // mid-drain rotation whose reopen failed), the synthetic
-          // notice can't be written. Surface the count textually via
-          // onError so the FIFO drop tally isn't silently lost on top
-          // of the rotation error the user already saw.
+          // The drain itself lost the handle (a mid-drain rotation
+          // whose reopen failed), so the synthetic notice can't be
+          // written. Surface the count textually via onError so the
+          // FIFO drop tally isn't silently lost on top of the
+          // rotation error the user already saw.
           _safeOnError(
             StateError(
               'RotatingFilePrinter: $_pendingDropped buffered entries '
@@ -240,10 +240,10 @@ class _RotatingFilePrinterIo implements RotatingFilePrinter {
   /// Drains [queue] through [_writeEntry], counting per-entry failures.
   /// Each failure still routes through [_safeOnError] for live
   /// observability; the returned count exists so callers can surface a
-  /// summary after the loop (round-8 fix) — under sustained failure
-  /// with an async onError handler, all per-entry errors after the
-  /// first are coalesced by the handler guard, so the live signal is
-  /// "first error wins". The aggregate makes the total visible.
+  /// summary after the loop. With an async onError handler, all
+  /// per-entry errors after the first are coalesced by the handler
+  /// guard ("first error wins" live signal); the aggregate makes the
+  /// total visible.
   int _drainFailures(Queue<LogEntry> queue) {
     var failures = 0;
     while (queue.isNotEmpty) {
@@ -260,13 +260,12 @@ class _RotatingFilePrinterIo implements RotatingFilePrinter {
   void _writeEntry(LogEntry entry) {
     final handle = _handle;
     if (handle == null) {
-      // Round-5: throw rather than silently early-return so callers'
-      // try/catch surfaces this via onError. Pre-round-5, the drain
-      // loops in _initialize / close() / flush() would silently consume
-      // entries when rotation reopen failure mid-drain nulled the
-      // handle — a clear violation of close()'s durability contract.
-      // log() never reaches this branch (its auto-reopen path either
-      // sets _handle or returns before calling _writeEntry).
+      // Throw rather than silently early-return so the calling drain
+      // loop's try/catch surfaces this via onError. Silent
+      // consumption would let mid-drain rotation-reopen failures
+      // violate close()'s durability contract. log() never reaches
+      // this branch (its auto-reopen path either sets _handle or
+      // returns before calling _writeEntry).
       throw StateError(
         'RotatingFilePrinter: write attempted with null handle — '
         'rotation reopen likely failed; entry dropped',
@@ -325,14 +324,13 @@ class _RotatingFilePrinterIo implements RotatingFilePrinter {
       // can continue. The live file may have been moved (rename succeeded
       // but a later step failed) — `openSync(append)` will recreate it.
       //
-      // Round-8 fix: `_safeOnError` may invoke a sync handler that
-      // routes through this same printer's `log()` (or the sync
-      // prefix of an async one), which itself runs the auto-reopen
-      // path when `_handle == null && _path != null`. If THAT reopen
-      // succeeds first, our subsequent `openSync` would overwrite
-      // `_handle` and leak the handler-opened file descriptor. Gate
-      // the recovery reopen on `_handle == null` so the
-      // already-recovered fd is preserved.
+      // `_safeOnError` may invoke a sync handler that routes through
+      // this same printer's `log()` (or the sync prefix of an async
+      // one), which itself runs the auto-reopen path when `_handle ==
+      // null && _path != null`. If that reopen wins first, our
+      // subsequent `openSync` would overwrite `_handle` and leak the
+      // handler-opened file descriptor. Gate the recovery reopen on
+      // `_handle == null` so the already-recovered fd is preserved.
       _safeOnError(e, st);
       if (_handle == null) {
         try {
@@ -452,15 +450,14 @@ class _RotatingFilePrinterIo implements RotatingFilePrinter {
   /// Match is strict: `<stem>.<8d>T<6d>Z(.<n>)?<ext>(.gz)?`. This avoids
   /// touching unrelated user files like `app.config.log` next to `app.log`.
   ///
-  /// Round-10b dedup (audit fix): under `compress: true`, a transient
+  /// Files are grouped by rotation signature (`<ts>(.<n>)?`) so a
+  /// `.log + .log.gz` pair from the same rotation counts as one
+  /// rotation toward `maxFiles`. Under `compress: true`, a transient
   /// failure to delete the source file after gzipping can leave both
-  /// `app.<ts>.log` and `app.<ts>.log.gz` on disk for the same rotation.
-  /// The earlier flat-count implementation treated each as a separate
-  /// rotation toward `maxFiles`, which could prune a *different* (older
-  /// and still-needed) rotation by one. We now group by the rotation
-  /// signature (`<ts>(.<n>)?`) so a `.log + .log.gz` pair counts as one
-  /// rotation. Both files in the pair are deleted together when the
-  /// rotation falls outside the retention window.
+  /// `app.<ts>.log` and `app.<ts>.log.gz` on disk — treating them as
+  /// separate rotations would prune a *different* (older but still
+  /// needed) rotation off the end. Both files in a pair are deleted
+  /// together when the rotation falls outside the retention window.
   void _enforceMaxFiles(String basePath) {
     final maxFiles = _config?.maxFiles;
     if (maxFiles == null) return;
@@ -469,12 +466,10 @@ class _RotatingFilePrinterIo implements RotatingFilePrinter {
       final dir = Directory(p.dirname(basePath));
       if (!dir.existsSync()) return;
 
-      final stem = p.basenameWithoutExtension(basePath);
-      final ext = p.extension(basePath);
-      final pattern = RegExp(
-        '^${RegExp.escape(stem)}'
+      final pattern = _rotatedFilePattern ??= RegExp(
+        '^${RegExp.escape(p.basenameWithoutExtension(basePath))}'
         r'(\.\d{8}T\d{6}Z(?:\.\d+)?)' // group 1: rotation signature
-        '${RegExp.escape(ext)}'
+        '${RegExp.escape(p.extension(basePath))}'
         r'(\.gz)?$',
       );
 
@@ -488,15 +483,14 @@ class _RotatingFilePrinterIo implements RotatingFilePrinter {
         groups.putIfAbsent(sig, () => []).add(f);
       }
 
-      // Sort groups oldest-first by modification time of any member;
-      // the .log and .log.gz of a pair were written close together so
-      // either gives a stable ordering.
-      final sortedGroups = groups.values.toList()
-        ..sort((a, b) {
-          final aT = a.first.statSync().modified;
-          final bT = b.first.statSync().modified;
-          return aT.compareTo(bT);
-        });
+      // Materialize (group, mtime) pairs in one stat pass to avoid the
+      // sort comparator firing `statSync()` O(n log n) times. The
+      // first member's mtime is representative — a rotation's
+      // `.log` and `.log.gz` are written close together.
+      final stamped = <(List<File>, DateTime)>[
+        for (final g in groups.values) (g, g.first.statSync().modified),
+      ]..sort((a, b) => a.$2.compareTo(b.$2));
+      final sortedGroups = [for (final s in stamped) s.$1];
 
       while (sortedGroups.length > maxFiles) {
         final oldest = sortedGroups.removeAt(0);
@@ -580,13 +574,11 @@ class _RotatingFilePrinterIo implements RotatingFilePrinter {
 
   /// Tracks the most-recent in-flight async handler `Future`, if any.
   ///
-  /// Used by [_safeOnErrorAfterCurrentHandler] to schedule aggregate
-  /// summaries (round-9 fix): the round-8 drain-failure aggregate
-  /// went through `_safeOnError` while [_inSafeOnError] was held by
-  /// an async handler, so the aggregate itself was coalesced — the
-  /// fix didn't actually fix visibility. By chaining the aggregate
-  /// onto this Future via `whenComplete`, the aggregate fires AFTER
-  /// the handler settles, which clears the guard.
+  /// Used by [_safeOnErrorAfterCurrentHandler] so a drain-failure
+  /// summary fires *after* an in-flight async handler settles. Without
+  /// this hop the summary would route through `_safeOnError` while
+  /// [_inSafeOnError] is still held, get coalesced like the per-entry
+  /// calls, and silently disappear exactly when it was needed most.
   Future<void>? _currentHandlerFuture;
 
   /// Calls the user-supplied error handler; if THAT throws (synchronously
@@ -648,11 +640,6 @@ class _RotatingFilePrinterIo implements RotatingFilePrinter {
   /// via `whenComplete` so it fires after the handler settles and
   /// the guard clears, surfacing the summary as its own onError
   /// invocation.
-  ///
-  /// Round-9 fix: the round-8 drain-failure aggregate went through
-  /// the guarded `_safeOnError` directly, so under async handlers
-  /// it was coalesced just like the per-entry calls — the "fix"
-  /// silently disappeared exactly when it was needed most.
   void _safeOnErrorAfterCurrentHandler(Object error, StackTrace? stackTrace) {
     final pending = _currentHandlerFuture;
     if (pending == null) {

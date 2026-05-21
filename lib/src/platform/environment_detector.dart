@@ -23,12 +23,11 @@ import 'package:universal_io/io.dart' as io;
 ///   can compose decorators based on what the target actually
 ///   supports rather than guessing from a label.
 ///
-/// Round-9 dropped the `sealed` modifier: future versions can add new
-/// leaves without breaking consumer pattern-matches that include a
-/// `default` arm. Consumers who pattern-match exhaustively without a
-/// fallback should be aware that adding leaves is technically
-/// non-breaking for compilation but may produce uncovered runtime
-/// values.
+/// Intentionally not `sealed`: future versions can add new leaves
+/// without breaking consumer pattern-matches that include a `default`
+/// arm. Consumers who pattern-match exhaustively without a fallback
+/// should be aware that adding leaves is non-breaking for compilation
+/// but may produce uncovered runtime values.
 abstract class RuntimeEnvironment {
   const RuntimeEnvironment();
 }
@@ -305,13 +304,11 @@ class EnvironmentDetector {
       final winOk =
           isWin && (env['ANSICON'] != null || env['WT_SESSION'] != null);
       try {
-        // Round-9 audit fix (M7): on Windows the `TERM` env var is
-        // often absent under Windows Terminal even though `WT_SESSION`
-        // / `ANSICON` are set and the terminal does support ANSI. The
-        // pre-fix predicate `(supportsAnsiEscapes || winOk) &&
-        // (term.isNotEmpty || winOk)` collapsed to "must have TERM"
-        // when winOk was false, but on Windows we want winOk alone to
-        // be sufficient regardless of TERM. Branch the Windows path.
+        // On Windows the `TERM` env var is often absent under Windows
+        // Terminal even though `WT_SESSION` / `ANSICON` are set and
+        // the terminal does support ANSI. Treat winOk alone as
+        // sufficient there; everywhere else still require a non-empty
+        // TERM in addition to `supportsAnsiEscapes`.
         if (isWin && winOk) {
           ansi = true;
         } else {

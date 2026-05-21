@@ -48,6 +48,7 @@ HyperLogger.init(printer: LogPrinterPresets.terminal());
 | `ci()` | Timestamp + Prefix | CI/CD log streams (machine-parseable) |
 | `gcp()` | JSON output | Google Cloud Logging (Cloud Run, GKE, App Engine, Functions) |
 | `aws()` | JSON output | AWS CloudWatch (Lambda, ECS, EKS) |
+| `azure()` | JSON output | Azure Application Insights / App Service / Functions |
 
 `human(caps)` composes by capability:
 

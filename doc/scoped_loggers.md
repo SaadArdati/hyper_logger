@@ -71,6 +71,8 @@ log.warning('rate limited');
 // Crash reporting receives: "[stripe] rate limited"
 ```
 
+![Silent-mode output: console empty, crash reporting receives the tagged message](../assets/preview_doc_scoped_silent.png)
+
 One thing to watch out for: passing an empty string (`tag: ''`) is not
 the same as `null`. It will prepend `[]` to every message, which is
 probably not what you intended. Use `null` (or just omit `tag`) if you

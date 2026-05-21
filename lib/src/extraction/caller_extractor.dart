@@ -9,6 +9,8 @@ class CallerExtractor {
     'dart:',
   ];
 
+  static final RegExp _stripMemberChars = RegExp(r'[<>()]');
+
   /// Extracts caller info from a raw StackTrace.
   ///
   /// When [prebuiltChain] is provided, skips the expensive [Chain.forTrace]
@@ -38,7 +40,7 @@ class CallerExtractor {
 
           return (
             className: parts[0],
-            methodName: parts[1].replaceAll(RegExp(r'[<>()]'), ''),
+            methodName: parts[1].replaceAll(_stripMemberChars, ''),
           );
         }
       }

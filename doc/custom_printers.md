@@ -240,6 +240,10 @@ Used automatically on web platforms. Uses Chrome DevTools APIs for
 structured output:
 
 ```dart
+// On web, import the web sub-barrel — WebConsolePrinter depends on
+// dart:js_interop and is not exported from the main barrel.
+import 'package:hyper_logger/web.dart';
+
 WebConsolePrinter(
   methodCount: 8,        // Stack trace frames
   errorMethodCount: null, // Falls back to methodCount

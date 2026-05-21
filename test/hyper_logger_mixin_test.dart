@@ -43,6 +43,9 @@ class _RecordingScopedLogger implements ScopedLoggerApi<_TestClass> {
   final Map<String, Object?> context = <String, Object?>{};
 
   @override
+  LogMode mode = LogMode.enabled;
+
+  @override
   ScopedLoggerApi<_TestClass> child({Map<String, Object?>? context}) => this;
 
   @override
