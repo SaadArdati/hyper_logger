@@ -143,11 +143,11 @@ and async path resolution. IO-only — constructing it on web throws
 ```dart
 final filePrinter = RotatingFilePrinter(
   baseFilePathProvider: () => '/var/log/app.log',
-  rotationConfig: FileRotationConfig.size(
-    maxBytes: 10 * 1024 * 1024,  // 10 MB
-    maxFiles: 5,
-    compress: true,
-  ),
+  rotations: [
+    FileRotation.size(10 * 1024 * 1024), // rotate at 10 MB (continuous)
+    FileRotation.onStart(),              // also rotate on every process start
+  ],
+  retention: FileRetention(maxFiles: 5, compress: true),
 );
 
 HyperLogger.init(printer: filePrinter);
@@ -176,16 +176,27 @@ final filePrinter = RotatingFilePrinter(
 
 #### Rotation policies
 
-| Constructor | Trigger |
-|---|---|
-| `FileRotationConfig.size(maxBytes: N)` | rotate when file reaches N bytes |
-| `FileRotationConfig.daily()` | rotate every 24 hours |
-| `FileRotationConfig.interval(interval: D)` | rotate every `D` |
+Pass a list of `FileRotation` rules. Each rule pairs a trigger with a
+`Cadence` — `continuous` (checked on every write) or `onStart` (checked
+once when the file is opened). Rules compose as a union: the first to
+fire triggers one rotation.
 
-`compress: true` gzips rotated files (`.log.gz`). `maxFiles: N`
-deletes the oldest rotated siblings on each rotation. Time-based
-rotation honors the file's last-modified time, so a process that
-restarts mid-day inherits the previous run's window.
+| Rule | Trigger |
+|---|---|
+| `FileRotation.size(N)` | rotate when file reaches N bytes |
+| `FileRotation.daily()` | rotate every 24 hours |
+| `FileRotation.interval(D)` | rotate every `D` |
+| `FileRotation.onStart()` | rotate (or `discard`) on each process start |
+
+Each trigger takes an optional `cadence:` (default `Cadence.continuous`);
+`size`/`interval` with `cadence: Cadence.onStart` rotate at open only if
+the *existing* file already exceeds the byte/age bound.
+
+Retention is shared across all rules via `FileRetention`: `compress: true`
+gzips rotated files (`.log.gz`), `maxFiles: N` keeps at most N archives,
+and `maxAge: D` deletes archives older than `D` — both pruned on each
+rotation. Time-based rotation honors the file's last-modified time, so a
+process that restarts mid-day inherits the previous run's window.
 
 #### Output format
 
@@ -396,11 +407,8 @@ HyperLogger.init(
     LogPrinterPresets.terminal(),                    // pretty for humans
     RotatingFilePrinter(                             // archive to disk
       baseFilePathProvider: () => '/var/log/app.log',
-      rotationConfig: FileRotationConfig.size(
-        maxBytes: 10 * 1024 * 1024,
-        maxFiles: 5,
-        compress: true,
-      ),
+      rotations: [FileRotation.size(10 * 1024 * 1024)],
+      retention: FileRetention(maxFiles: 5, compress: true),
     ),
   ]),
 );

@@ -228,11 +228,11 @@ final filePrinter = RotatingFilePrinter(
     final dir = await getApplicationSupportDirectory();
     return '${dir.path}/logs/app.log';
   },
-  rotationConfig: FileRotationConfig.size(
-    maxBytes: 10 * 1024 * 1024,  // 10 MB
-    maxFiles: 5,
-    compress: true,
-  ),
+  rotations: [
+    FileRotation.size(10 * 1024 * 1024), // rotate at 10 MB (continuous)
+    FileRotation.onStart(),              // also rotate on every process start
+  ],
+  retention: FileRetention(maxFiles: 5, compress: true),
   onError: (error, stack) {
     // surface IO failures to your monitoring; default is stderr
   },
@@ -258,11 +258,8 @@ HyperLogger.init(
     LogPrinterPresets.terminal(),
     RotatingFilePrinter(
       baseFilePathProvider: () => '/var/log/app.log',
-      rotationConfig: FileRotationConfig.size(
-        maxBytes: 10 * 1024 * 1024,
-        maxFiles: 5,
-        compress: true,
-      ),
+      rotations: [FileRotation.size(10 * 1024 * 1024)],
+      retention: FileRetention(maxFiles: 5, compress: true),
     ),
   ]),
 );

@@ -7,7 +7,8 @@ import 'rotating_file_printer.dart';
 RotatingFilePrinter createRotatingFilePrinter({
   required FutureOr<String> Function() baseFilePathProvider,
   required FileLineFormatter formatter,
-  FileRotationConfig? rotationConfig,
+  List<FileRotation> rotations = const [],
+  FileRetention? retention,
   int pendingBufferSize = 1000,
   required FileWriterErrorHandler onError,
 }) {

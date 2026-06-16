@@ -15,14 +15,16 @@ import 'rotating_file_printer.dart';
 RotatingFilePrinter createRotatingFilePrinter({
   required FutureOr<String> Function() baseFilePathProvider,
   required FileLineFormatter formatter,
-  FileRotationConfig? rotationConfig,
+  List<FileRotation> rotations = const [],
+  FileRetention? retention,
   int pendingBufferSize = 1000,
   required FileWriterErrorHandler onError,
 }) {
   return _RotatingFilePrinterIo(
     baseFilePathProvider: baseFilePathProvider,
     formatter: formatter,
-    rotationConfig: rotationConfig,
+    rotations: rotations,
+    retention: retention,
     pendingBufferSize: pendingBufferSize,
     onError: onError,
   );
@@ -36,7 +38,8 @@ void writeStderrLine(String line) {
 class _RotatingFilePrinterIo implements RotatingFilePrinter {
   final FutureOr<String> Function() _pathProvider;
   final FileLineFormatter _formatter;
-  final FileRotationConfig? _config;
+  final List<FileRotation> _rotations;
+  final FileRetention? _retention;
   final int _pendingBufferSize;
   final FileWriterErrorHandler _onError;
 
@@ -71,12 +74,14 @@ class _RotatingFilePrinterIo implements RotatingFilePrinter {
   _RotatingFilePrinterIo({
     required FutureOr<String> Function() baseFilePathProvider,
     required FileLineFormatter formatter,
-    FileRotationConfig? rotationConfig,
+    List<FileRotation> rotations = const [],
+    FileRetention? retention,
     int pendingBufferSize = 1000,
     required FileWriterErrorHandler onError,
   }) : _pathProvider = baseFilePathProvider,
        _formatter = formatter,
-       _config = rotationConfig,
+       _rotations = rotations,
+       _retention = retention,
        _pendingBufferSize = pendingBufferSize,
        _onError = onError {
     _readyFuture = _initialize();
@@ -102,7 +107,8 @@ class _RotatingFilePrinterIo implements RotatingFilePrinter {
       // time when available, so a process that restarts mid-day inherits
       // the previous run's rotation cadence rather than starting a fresh
       // 24-hour window. Falls back to wall clock if mtime is unavailable.
-      DateTime windowStart = clock.now();
+      final now = clock.now();
+      DateTime windowStart = now;
       try {
         if (file.existsSync()) {
           final mtime = file.lastModifiedSync();
@@ -114,6 +120,10 @@ class _RotatingFilePrinterIo implements RotatingFilePrinter {
         // mtime unavailable — fall back to wall clock.
       }
       _windowStart = windowStart;
+
+      // Evaluate onStart rotation rules once, now that the handle is open
+      // and the rotation window is seeded.
+      _evaluateStartupRotations(now);
 
       // Drain anything buffered before path resolved. We deliberately do
       // NOT bail on _closed — close() awaits this future and expects the
@@ -280,19 +290,34 @@ class _RotatingFilePrinterIo implements RotatingFilePrinter {
     _maybeRotate();
   }
 
+  /// Checks every [Cadence.continuous] rule against the shared rotation
+  /// window and rotates once if any fires.
+  ///
+  /// Continuous rules share the single `_bytesWritten` / `_windowStart`
+  /// window state: the first rule to fire triggers one rotation, and
+  /// `_rotate` resets BOTH counters — so the most sensitive rule always
+  /// wins and rules do not have independent windows. A single rule may set
+  /// both `maxBytes` and `interval`; the two checks below are evaluated as
+  /// OR (either condition fires), so the fall-through between them is
+  /// intentional.
   void _maybeRotate() {
-    final config = _config;
-    if (config == null) return;
+    if (_rotations.isEmpty) return;
 
     final now = clock.now();
-    final dueBySize =
-        config.maxBytes != null && _bytesWritten >= config.maxBytes!;
-    final dueByTime =
-        config.interval != null &&
-        now.difference(_windowStart) >= config.interval!;
-    if (!dueBySize && !dueByTime) return;
-
-    _rotate(now);
+    var due = false;
+    for (final rule in _rotations) {
+      if (rule.cadence != Cadence.continuous) continue;
+      if (rule.maxBytes != null && _bytesWritten >= rule.maxBytes!) {
+        due = true;
+        break;
+      }
+      if (rule.interval != null &&
+          now.difference(_windowStart) >= rule.interval!) {
+        due = true;
+        break;
+      }
+    }
+    if (due) _rotate(now);
   }
 
   void _rotate(DateTime now) {
@@ -309,12 +334,12 @@ class _RotatingFilePrinterIo implements RotatingFilePrinter {
       final file = File(path);
       if (file.existsSync() && file.lengthSync() > 0) {
         file.renameSync(rotatedPath);
-        if (_config?.compress ?? false) {
+        if (_retention?.compress ?? false) {
           _scheduleCompression(rotatedPath);
         }
       }
 
-      _enforceMaxFiles(path);
+      _enforceRetention(path, now);
 
       _handle = File(path).openSync(mode: FileMode.append);
       _bytesWritten = 0;
@@ -351,6 +376,93 @@ class _RotatingFilePrinterIo implements RotatingFilePrinter {
     }
   }
 
+  /// Evaluates [Cadence.onStart] rules once, against the existing file on
+  /// disk. If any fires, performs a single startup rotation (archive, or
+  /// discard for `onStart(discard: true)`). Called from [_initialize] after
+  /// the handle is open and before buffered entries drain.
+  void _evaluateStartupRotations(DateTime now) {
+    final path = _path;
+    if (path == null) return;
+
+    final file = File(path);
+    if (!file.existsSync()) return;
+    final fileLength = file.lengthSync();
+    if (fileLength == 0) return;
+
+    FileRotation? firing;
+    for (final rule in _rotations) {
+      if (rule.cadence != Cadence.onStart) continue;
+      if (rule.unconditional) {
+        firing = rule;
+        break;
+      }
+      if (rule.maxBytes != null && fileLength >= rule.maxBytes!) {
+        firing = rule;
+        break;
+      }
+      if (rule.interval != null) {
+        DateTime? mtime;
+        try {
+          mtime = file.lastModifiedSync();
+        } catch (_) {
+          mtime = null;
+        }
+        if (mtime != null && now.difference(mtime) >= rule.interval!) {
+          firing = rule;
+          break;
+        }
+      }
+    }
+
+    if (firing == null) return;
+    if (firing.discard) {
+      _startupDiscard(now);
+    } else {
+      _rotate(now);
+    }
+  }
+
+  /// Startup `discard` action: closes the handle, deletes the existing file
+  /// (no archive), and reopens a fresh empty file. Mirrors [_rotate]'s
+  /// recovery semantics on failure.
+  void _startupDiscard(DateTime now) {
+    final path = _path;
+    final handle = _handle;
+    if (path == null || handle == null) return;
+
+    try {
+      handle.flushSync();
+      handle.closeSync();
+      _handle = null;
+
+      final file = File(path);
+      if (file.existsSync()) file.deleteSync();
+
+      _handle = File(path).openSync(mode: FileMode.append);
+      _bytesWritten = 0;
+      _windowStart = now;
+    } catch (e, st) {
+      // Mirrors _rotate's recovery: _safeOnError may invoke a handler that
+      // routes back through log() and auto-reopens the handle. Gate the
+      // recovery reopen on `_handle == null` so an already-recovered fd
+      // isn't leaked; otherwise sync `_bytesWritten` to disk so the
+      // pending drain doesn't immediately over-rotate on stale state.
+      _safeOnError(e, st);
+      if (_handle == null) {
+        try {
+          _handle = File(path).openSync(mode: FileMode.append);
+          _bytesWritten = 0;
+          _windowStart = now;
+        } catch (e2, st2) {
+          _safeOnError(e2, st2);
+        }
+      } else {
+        _bytesWritten = File(path).existsSync() ? File(path).lengthSync() : 0;
+        _windowStart = now;
+      }
+    }
+  }
+
   /// Builds a rotated file name like `app.20260508T120000Z.log`. Adds a
   /// `.<n>` numeric suffix if the timestamp collides with an existing file
   /// (rapid rotation under tiny size limits). When compression is enabled,
@@ -361,7 +473,7 @@ class _RotatingFilePrinterIo implements RotatingFilePrinter {
     final ext = p.extension(basePath);
     final stem = p.basenameWithoutExtension(basePath);
     final ts = _compactUtcTimestamp(now);
-    final compress = _config?.compress ?? false;
+    final compress = _retention?.compress ?? false;
 
     String candidate(int? counter) {
       final suffix = counter == null ? '' : '.$counter';
@@ -388,7 +500,7 @@ class _RotatingFilePrinterIo implements RotatingFilePrinter {
   /// no part of the ISO string (microseconds, the trailing `Z`) is lost.
   ///
   /// Asserts the year fits in 4 digits — years > 9999 would break the
-  /// `\d{8}` (year+month+day) regex used by [_enforceMaxFiles]. Practically
+  /// `\d{8}` (year+month+day) regex used by [_enforceRetention]. Practically
   /// irrelevant for any clock you might encounter, but the assertion makes
   /// the contract explicit.
   static String _compactUtcTimestamp(DateTime t) {
@@ -406,6 +518,26 @@ class _RotatingFilePrinterIo implements RotatingFilePrinter {
     return '$y$m${d}T$hh$mm${ss}Z';
   }
 
+  /// Parses the UTC time from a rotation signature like
+  /// `.20260508T120000Z` or `.20260508T120000Z.3`. Returns null if the
+  /// signature doesn't contain a parseable timestamp.
+  static DateTime? _parseSignatureTime(String signature) {
+    // Anchored at the signature's leading dot (always `.<ts>` from
+    // `_rotatedFilePattern`) so a future prefix can't shift the match.
+    final m = RegExp(
+      r'^\.(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z',
+    ).firstMatch(signature);
+    if (m == null) return null;
+    return DateTime.utc(
+      int.parse(m.group(1)!),
+      int.parse(m.group(2)!),
+      int.parse(m.group(3)!),
+      int.parse(m.group(4)!),
+      int.parse(m.group(5)!),
+      int.parse(m.group(6)!),
+    );
+  }
+
   /// Schedules `srcPath` for streaming gzip compression off the sync
   /// `log()` path. Compressions are serialized so that two rotations in
   /// quick succession don't fight over the same buffers; [close] and
@@ -414,7 +546,7 @@ class _RotatingFilePrinterIo implements RotatingFilePrinter {
   /// On failure, both the partial `.gz` and the original `.log` are left
   /// intact, the partial `.gz` is deleted (so it can't be confused for a
   /// real archive), and the error is surfaced via `onError`. The next
-  /// rotation's `_enforceMaxFiles` sweep will eventually prune the
+  /// rotation's `_enforceRetention` sweep will eventually prune the
   /// uncompressed survivor by age.
   void _scheduleCompression(String srcPath) {
     _compressionChain = _compressionChain.then((_) async {
@@ -445,22 +577,20 @@ class _RotatingFilePrinterIo implements RotatingFilePrinter {
     });
   }
 
-  /// Deletes the oldest rotated files when the count exceeds `maxFiles`.
-  ///
-  /// Match is strict: `<stem>.<8d>T<6d>Z(.<n>)?<ext>(.gz)?`. This avoids
-  /// touching unrelated user files like `app.config.log` next to `app.log`.
+  /// Prunes rotated archives that violate the [FileRetention] policy:
+  /// deletes any archive older than `maxAge`, then deletes oldest archives
+  /// until at most `maxFiles` remain. Both null => no-op.
   ///
   /// Files are grouped by rotation signature (`<ts>(.<n>)?`) so a
-  /// `.log + .log.gz` pair from the same rotation counts as one
-  /// rotation toward `maxFiles`. Under `compress: true`, a transient
-  /// failure to delete the source file after gzipping can leave both
-  /// `app.<ts>.log` and `app.<ts>.log.gz` on disk — treating them as
-  /// separate rotations would prune a *different* (older but still
-  /// needed) rotation off the end. Both files in a pair are deleted
-  /// together when the rotation falls outside the retention window.
-  void _enforceMaxFiles(String basePath) {
-    final maxFiles = _config?.maxFiles;
-    if (maxFiles == null) return;
+  /// `.log + .log.gz` pair from the same rotation counts as one rotation.
+  /// Age is taken from the filename timestamp (reliable across copy/touch),
+  /// falling back to filesystem mtime when a name doesn't parse.
+  void _enforceRetention(String basePath, DateTime now) {
+    final retention = _retention;
+    if (retention == null) return;
+    final maxFiles = retention.maxFiles;
+    final maxAge = retention.maxAge;
+    if (maxFiles == null && maxAge == null) return;
 
     try {
       final dir = Directory(p.dirname(basePath));
@@ -474,7 +604,7 @@ class _RotatingFilePrinterIo implements RotatingFilePrinter {
       );
 
       // Group files by rotation signature so .log + .log.gz pairs from
-      // the same rotation count as ONE rotation toward maxFiles.
+      // the same rotation count as ONE rotation.
       final groups = <String, List<File>>{};
       for (final f in dir.listSync().whereType<File>()) {
         final m = pattern.firstMatch(p.basename(f.path));
@@ -483,32 +613,53 @@ class _RotatingFilePrinterIo implements RotatingFilePrinter {
         groups.putIfAbsent(sig, () => []).add(f);
       }
 
-      // Materialize (group, mtime) pairs in one stat pass to avoid the
-      // sort comparator firing `statSync()` O(n log n) times. The
-      // first member's mtime is representative — a rotation's
-      // `.log` and `.log.gz` are written close together.
+      // Resolve each group's time: prefer the filename timestamp, fall
+      // back to mtime. Stat once per group.
       final stamped = <(List<File>, DateTime)>[
-        for (final g in groups.values) (g, g.first.statSync().modified),
+        for (final entry in groups.entries)
+          (
+            entry.value,
+            _parseSignatureTime(entry.key) ??
+                entry.value.first.statSync().modified,
+          ),
       ]..sort((a, b) => a.$2.compareTo(b.$2));
-      final sortedGroups = [for (final s in stamped) s.$1];
 
-      while (sortedGroups.length > maxFiles) {
-        final oldest = sortedGroups.removeAt(0);
-        var failed = false;
-        for (final f in oldest) {
+      // Helper to delete a whole group; returns false if a delete fails.
+      bool deleteGroup(List<File> g) {
+        for (final f in g) {
           try {
             f.deleteSync();
           } catch (e, st) {
             _safeOnError(e, st);
-            failed = true;
-            break;
+            return false;
           }
         }
-        // If we couldn't delete any file in the oldest group, stop
-        // trying to prune — repeated `_safeOnError` calls in a tight
-        // loop on a permanent failure (read-only mount, perms) would
-        // spam the error sink.
-        if (failed) break;
+        return true;
+      }
+
+      // Phase 1: age-based pruning. The predicate has a side effect: it
+      // deletes the group's files and returns whether the delete succeeded.
+      // Returning false on a failed delete deliberately KEEPS the group in
+      // `stamped` (so phase 2 can still attempt count-based pruning on it)
+      // — do not "simplify" this to a pure isBefore() check.
+      if (maxAge != null) {
+        final cutoff = now.subtract(maxAge);
+        stamped.removeWhere((s) {
+          if (s.$2.isBefore(cutoff)) {
+            return deleteGroup(s.$1);
+          }
+          return false;
+        });
+      }
+
+      // Phase 2: count-based pruning (oldest first). Abort on the first
+      // failed delete — the filesystem may be in trouble and retrying would
+      // just spam onError.
+      if (maxFiles != null) {
+        while (stamped.length > maxFiles) {
+          final oldest = stamped.removeAt(0);
+          if (!deleteGroup(oldest.$1)) break;
+        }
       }
     } catch (e, st) {
       _safeOnError(e, st);

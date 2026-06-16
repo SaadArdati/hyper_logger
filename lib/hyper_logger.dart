@@ -49,7 +49,9 @@ export 'src/printer/azure_json_printer.dart';
 export 'src/printer/rotating_file_printer.dart'
     show
         RotatingFilePrinter,
-        FileRotationConfig,
+        Cadence,
+        FileRotation,
+        FileRetention,
         FileLineFormatter,
         FileWriterErrorHandler,
         defaultFileLineFormatter,

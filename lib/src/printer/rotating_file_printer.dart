@@ -73,10 +73,11 @@ typedef FileWriterErrorHandler =
 /// ```dart
 /// final filePrinter = RotatingFilePrinter(
 ///   baseFilePathProvider: () => '/var/log/app.log',
-///   rotationConfig: FileRotationConfig.size(
-///     maxBytes: 10 * 1024 * 1024, // 10 MB
-///     maxFiles: 5,
-///   ),
+///   rotations: [
+///     FileRotation.size(10 * 1024 * 1024), // rotate at 10 MB (continuous)
+///     FileRotation.onStart(),              // also rotate on every process start
+///   ],
+///   retention: FileRetention(maxFiles: 5),
 /// );
 ///
 /// HyperLogger.init(printer: filePrinter);
@@ -106,16 +107,29 @@ typedef FileWriterErrorHandler =
 ///
 /// ## Rotation
 ///
-/// - Size-based: [FileRotationConfig.size] — rotate when the file reaches
-///   the configured byte threshold.
-/// - Time-based: [FileRotationConfig.daily] or [FileRotationConfig.interval]
-///   — rotate when the elapsed time since last rotation crosses the bound.
-/// - With no [rotationConfig], the printer appends forever to a single file.
+/// Pass a list of [FileRotation] rules; each pairs a trigger with a
+/// [Cadence] (`continuous` — checked on every write — or `onStart` —
+/// checked once when the file is opened). Rules compose as a union: the
+/// first to fire triggers one rotation.
 ///
-/// Rotated files are renamed to `<base>.<timestamp>.<ext>`. With
-/// [FileRotationConfig.compress] enabled, rotated files are gzipped to
-/// `<base>.<timestamp>.<ext>.gz`. When [FileRotationConfig.maxFiles] is set,
-/// older rotated files are deleted on rotation.
+/// - Size-based: [FileRotation.size] — rotate when the file reaches the
+///   configured byte threshold.
+/// - Time-based: [FileRotation.daily] or [FileRotation.interval] — rotate
+///   when the elapsed time (continuous) or existing-file age (onStart)
+///   crosses the bound.
+/// - Startup (unconditional): [FileRotation.onStart] — always rotate (or
+///   `discard`) the existing file on each process start. For a
+///   *conditional* startup rotation, use `size`/`interval` with
+///   `cadence: Cadence.onStart`: it fires at open only if the existing
+///   file already exceeds the byte threshold / age bound.
+/// - With an empty `rotations` list, the printer appends forever to a
+///   single file.
+///
+/// Rotated files are renamed to `<base>.<timestamp>.<ext>`. Retention is
+/// shared across all rules via [FileRetention]: with `compress` enabled,
+/// rotated files are gzipped to `<base>.<timestamp>.<ext>.gz`; `maxFiles`
+/// caps the archive count and `maxAge` deletes archives older than a
+/// bound, both pruned on rotation.
 ///
 /// ## Shutdown
 ///
@@ -141,8 +155,16 @@ abstract class RotatingFilePrinter implements LogPrinter {
   ///   Defaults to [defaultFileLineFormatter] (`<timestamp> [LEVEL] <logger>: <message>`).
   ///   For JSON Lines output, pass a formatter built from [GcpJsonPrinter]
   ///   or [AwsJsonPrinter].
-  /// - [rotationConfig]: optional rotation policy. Without it, the file
-  ///   grows unbounded.
+  /// - [rotations]: rotation rules (trigger × [Cadence]). Empty (the
+  ///   default) means the file grows unbounded. When several rules are
+  ///   given they compose as a union: continuous rules are checked on
+  ///   every write and onStart rules once at open, and the FIRST rule (in
+  ///   list order) to fire triggers a single rotation. List order matters
+  ///   if you mix an archiving onStart rule with a discarding one
+  ///   (`onStart(discard: true)`) — the earlier rule decides whether the
+  ///   existing log is archived or destroyed.
+  /// - [retention]: optional shared archive-retention policy (`maxFiles`,
+  ///   `maxAge`, `compress`). Null keeps all archives uncompressed.
   /// - [pendingBufferSize]: maximum number of records to hold in memory
   ///   while [baseFilePathProvider] is resolving. Must be `>= 1` (a value
   ///   of 0 or less throws [ArgumentError]). Older records are dropped
@@ -159,7 +181,8 @@ abstract class RotatingFilePrinter implements LogPrinter {
   factory RotatingFilePrinter({
     required FutureOr<String> Function() baseFilePathProvider,
     FileLineFormatter? formatter,
-    FileRotationConfig? rotationConfig,
+    List<FileRotation> rotations = const [],
+    FileRetention? retention,
     int pendingBufferSize = 1000,
     FileWriterErrorHandler? onError,
   }) {
@@ -173,7 +196,8 @@ abstract class RotatingFilePrinter implements LogPrinter {
     return impl.createRotatingFilePrinter(
       baseFilePathProvider: baseFilePathProvider,
       formatter: formatter ?? defaultFileLineFormatter,
-      rotationConfig: rotationConfig,
+      rotations: rotations,
+      retention: retention,
       pendingBufferSize: pendingBufferSize,
       onError: onError ?? defaultFileWriterErrorHandler,
     );
@@ -192,7 +216,7 @@ abstract class RotatingFilePrinter implements LogPrinter {
   /// are flushed to disk first.
   ///
   /// **Compression drain cap.** When rotated files are compressed
-  /// (`FileRotationConfig.compress: true`), [close] drains the gzip
+  /// (`FileRetention(compress: true)`), [close] drains the gzip
   /// chain up to a bounded number of iterations (100) to guarantee
   /// termination if compression itself keeps producing new work.
   /// Reaching the cap is surfaced via `onError` rather than thrown —
@@ -233,105 +257,122 @@ abstract class RotatingFilePrinter implements LogPrinter {
   Future<void> get ready;
 }
 
-/// Rotation policy for [RotatingFilePrinter].
+/// When a [FileRotation] rule's trigger condition is evaluated.
+enum Cadence {
+  /// Checked on every log write (rotation can happen mid-run).
+  continuous,
+
+  /// Checked exactly once, when the file is first opened.
+  onStart,
+}
+
+/// A single rotation rule: a trigger condition crossed with a [Cadence].
 ///
-/// Use the named constructors — [size], [daily], [interval] — rather than
-/// constructing directly. Combinations (size *and* interval) are not
-/// supported in this version.
-class FileRotationConfig {
-  /// Maximum file size in bytes before rotation. `null` means no
-  /// size-based rotation.
+/// Multiple rules can be supplied to one [RotatingFilePrinter] and compose
+/// as a union — whichever fires first triggers one rotation.
+///
+/// Use the factory constructors — [size], [interval], [daily], [onStart].
+class FileRotation {
+  /// Size threshold in bytes; null unless this is a size rule.
   final int? maxBytes;
 
-  /// Time between rotations (e.g. `Duration(days: 1)` for daily). `null`
-  /// means no time-based rotation.
+  /// Time threshold; null unless this is an interval rule. For
+  /// [Cadence.continuous] it bounds elapsed time since the last rotation;
+  /// for [Cadence.onStart] it bounds the existing file's last-modified age.
   final Duration? interval;
 
-  /// Maximum number of rotated files to retain. Older ones are deleted on
-  /// rotation. `null` means keep all.
-  final int? maxFiles;
+  /// When this rule's condition is evaluated.
+  final Cadence cadence;
 
-  /// If `true`, rotated files are gzipped to `<name>.gz`.
-  final bool compress;
+  /// Only meaningful for [onStart]: truncate/delete the existing file
+  /// instead of archiving it.
+  final bool discard;
 
-  const FileRotationConfig._({
+  const FileRotation._({
     this.maxBytes,
     this.interval,
-    this.maxFiles,
-    this.compress = false,
+    required this.cadence,
+    this.discard = false,
   });
 
-  /// Rotate when the file reaches [maxBytes] bytes.
+  /// True only for an unconditional [onStart] rule (no size/time condition).
+  /// Derived, not stored, so it cannot disagree with the other fields.
+  bool get unconditional =>
+      cadence == Cadence.onStart && maxBytes == null && interval == null;
+
+  /// Rotate when the live file reaches [maxBytes] bytes.
   ///
-  /// Throws [ArgumentError] if [maxBytes] is `<= 0` or if [maxFiles] is
-  /// `<= 0` (use `null` to retain unlimited rotated copies).
-  factory FileRotationConfig.size({
-    required int maxBytes,
-    int? maxFiles,
-    bool compress = false,
+  /// Throws [ArgumentError] if [maxBytes] is `<= 0`.
+  factory FileRotation.size(
+    int maxBytes, {
+    Cadence cadence = Cadence.continuous,
   }) {
     if (maxBytes <= 0) {
-      throw ArgumentError.value(
-        maxBytes,
-        'maxBytes',
-        'must be > 0; a non-positive value would rotate on every write',
-      );
+      throw ArgumentError.value(maxBytes, 'maxBytes', 'must be > 0');
     }
-    if (maxFiles != null && maxFiles <= 0) {
-      throw ArgumentError.value(
-        maxFiles,
-        'maxFiles',
-        'must be > 0 or null; a non-positive value would delete every '
-            'rotated file immediately',
-      );
-    }
-    return FileRotationConfig._(
-      maxBytes: maxBytes,
-      maxFiles: maxFiles,
-      compress: compress,
-    );
+    return FileRotation._(maxBytes: maxBytes, cadence: cadence);
   }
 
-  /// Rotate every 24 hours.
+  /// Rotate when elapsed time ([Cadence.continuous]) or existing-file age
+  /// ([Cadence.onStart]) reaches [interval].
   ///
-  /// Throws [ArgumentError] if [maxFiles] is `<= 0` (use `null` to retain
-  /// unlimited rotated copies).
-  factory FileRotationConfig.daily({int? maxFiles, bool compress = false}) {
-    if (maxFiles != null && maxFiles <= 0) {
-      throw ArgumentError.value(maxFiles, 'maxFiles', 'must be > 0 or null');
-    }
-    return FileRotationConfig._(
-      interval: const Duration(days: 1),
-      maxFiles: maxFiles,
-      compress: compress,
-    );
-  }
-
-  /// Rotate every [interval].
-  ///
-  /// Throws [ArgumentError] if [interval] is `<= Duration.zero` or if
-  /// [maxFiles] is `<= 0` (use `null` for unlimited).
-  factory FileRotationConfig.interval({
-    required Duration interval,
-    int? maxFiles,
-    bool compress = false,
+  /// Throws [ArgumentError] if [interval] is `<= Duration.zero`.
+  factory FileRotation.interval(
+    Duration interval, {
+    Cadence cadence = Cadence.continuous,
   }) {
     if (interval <= Duration.zero) {
       throw ArgumentError.value(
         interval,
         'interval',
-        'must be > Duration.zero; a non-positive interval would rotate '
-            'on every write',
+        'must be > Duration.zero',
       );
     }
-    if (maxFiles != null && maxFiles <= 0) {
+    return FileRotation._(interval: interval, cadence: cadence);
+  }
+
+  /// Sugar for `FileRotation.interval(const Duration(days: 1))`.
+  factory FileRotation.daily({Cadence cadence = Cadence.continuous}) =>
+      FileRotation.interval(const Duration(days: 1), cadence: cadence);
+
+  /// Unconditional rotation at file open. [discard] truncates/deletes the
+  /// existing file instead of archiving it.
+  factory FileRotation.onStart({bool discard = false}) =>
+      FileRotation._(cadence: Cadence.onStart, discard: discard);
+}
+
+/// Retention policy shared across all of a printer's rotation rules.
+///
+/// All rules rotate the same base file into one pool of
+/// `<base>.<timestamp>.<ext>[.gz]` archives, so retention is shared.
+class FileRetention {
+  /// Keep at most this many archives; older ones pruned. null = unlimited.
+  final int? maxFiles;
+
+  /// Delete archives older than this. null = no age limit.
+  final Duration? maxAge;
+
+  /// If true, rotated files are gzipped to `<name>.gz`. Independent of
+  /// pruning: with only `compress` set (no `maxFiles`/`maxAge`), archives
+  /// are gzipped but never deleted.
+  final bool compress;
+
+  /// Throws [ArgumentError] if [maxFiles] `<= 0` or [maxAge] `<= zero`
+  /// (use null for "no limit").
+  // Not const: the constructor throws ArgumentError on invalid bounds, which
+  // a const initializer-list assert cannot do. The printer's `retention`
+  // parameter therefore defaults to null (= keep all) rather than a const value.
+  FileRetention({this.maxFiles, this.maxAge, this.compress = false}) {
+    if (maxFiles != null && maxFiles! <= 0) {
       throw ArgumentError.value(maxFiles, 'maxFiles', 'must be > 0 or null');
     }
-    return FileRotationConfig._(
-      interval: interval,
-      maxFiles: maxFiles,
-      compress: compress,
-    );
+    if (maxAge != null && maxAge! <= Duration.zero) {
+      throw ArgumentError.value(
+        maxAge,
+        'maxAge',
+        'must be > Duration.zero or null',
+      );
+    }
   }
 }
 

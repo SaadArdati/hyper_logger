@@ -16,8 +16,8 @@ Future<void> main() async {
 
   final filePrinter = RotatingFilePrinter(
     baseFilePathProvider: () => logPath,
-    rotationConfig: FileRotationConfig.size(
-      maxBytes: 200, // tiny so the example actually rotates
+    rotations: [FileRotation.size(200)], // tiny so the example actually rotates
+    retention: FileRetention(
       maxFiles: 3, // keep at most 3 rotated copies
       compress: true, // gzip rotated files
     ),

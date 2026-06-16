@@ -21,11 +21,8 @@ import 'log_printer.dart';
 ///     LogPrinterPresets.terminal(),
 ///     RotatingFilePrinter(
 ///       baseFilePathProvider: () => '/var/log/app.log',
-///       rotationConfig: FileRotationConfig.size(
-///         maxBytes: 10 * 1024 * 1024,
-///         maxFiles: 5,
-///         compress: true,
-///       ),
+///       rotations: [FileRotation.size(10 * 1024 * 1024)],
+///       retention: FileRetention(maxFiles: 5, compress: true),
 ///     ),
 ///   ]),
 /// );
@@ -82,7 +79,7 @@ class MultiPrinter implements LogPrinter {
   /// An empty list is allowed and behaves as a silent sink — useful as
   /// a placeholder while wiring up integrations.
   MultiPrinter(List<LogPrinter> printers)
-      : printers = List.unmodifiable(printers);
+    : printers = List.unmodifiable(printers);
 
   @override
   void log(LogEntry entry) {
@@ -95,8 +92,9 @@ class MultiPrinter implements LogPrinter {
       try {
         printers[i].log(entry);
       } catch (e, st) {
-        (failures ??= <MultiPrinterChildError>[])
-            .add(MultiPrinterChildError(i, e, st));
+        (failures ??= <MultiPrinterChildError>[]).add(
+          MultiPrinterChildError(i, e, st),
+        );
       }
     }
     if (failures != null) {
@@ -133,7 +131,7 @@ class MultiPrinterError implements Exception {
   final List<MultiPrinterChildError> childErrors;
 
   MultiPrinterError(List<MultiPrinterChildError> childErrors)
-      : childErrors = List.unmodifiable(childErrors);
+    : childErrors = List.unmodifiable(childErrors);
 
   @override
   String toString() {
