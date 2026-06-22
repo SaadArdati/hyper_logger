@@ -1,9 +1,9 @@
 name: hyper_logger
 description: >-
-  Composable logging for Dart and Flutter with automatic environment
-  detection, scoped loggers, request-context propagation, file rotation,
-  GCP/AWS/Azure JSON output, and a Crashlytics-friendly delegate API.
-version: 0.2.0
+  Composable logging for Dart and Flutter: environment detection, scoped
+  loggers, request-context propagation, file rotation, and cloud-ready
+  JSON output for GCP, AWS, and Azure.
+version: 0.2.1
 repository: https://github.com/SaadArdati/hyper_logger
 issue_tracker: https://github.com/SaadArdati/hyper_logger/issues
 topics:

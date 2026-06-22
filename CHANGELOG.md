@@ -1,3 +1,7 @@
+## 0.2.1
+
+- Shorten the package description to satisfy pub.dev's character guideline.
+
 ## 0.2.0
 
 ### Breaking
