@@ -177,15 +177,17 @@ void main() {
 
     // ── Human + capability dispatch ───────────────────────────────────────────
 
-    test('falls through to HumanEnvironment with the supplied capabilities',
-        () {
-      const caps = TerminalCapabilities(ansi: true, tty: true, width: 120);
-      final env = const EnvironmentDetector().detect(
-        envOverride: {},
-        capabilitiesOverride: caps,
-      );
-      expect(env, const HumanEnvironment(caps));
-    });
+    test(
+      'falls through to HumanEnvironment with the supplied capabilities',
+      () {
+        const caps = TerminalCapabilities(ansi: true, tty: true, width: 120);
+        final env = const EnvironmentDetector().detect(
+          envOverride: {},
+          capabilitiesOverride: caps,
+        );
+        expect(env, const HumanEnvironment(caps));
+      },
+    );
 
     test('HumanEnvironment carries no-ansi / no-tty fallback as plain', () {
       final env = const EnvironmentDetector().detect(
@@ -205,74 +207,64 @@ void main() {
     // most tests above bypass it via `capabilitiesOverride`. These
     // tests pin the env-derived branches that *don't* depend on stdio.
 
-    test(
-      'IntelliJ-launched child (macOS __CFBundleIdentifier) is '
-      'recognized as ANSI-capable even when stdout is a pipe',
-      () {
-        // The whole point of the round-8 refactor: IntelliJ Run
-        // Configurations are not TTYs, but their Run Console DOES
-        // render ANSI. The bundle-ID heuristic kicks in to flip
-        // `ansi: true` for known IDE bundles.
-        final caps = EnvironmentDetector.detectCapabilities(
-          envOverride: const {
-            '__CFBundleIdentifier': 'com.jetbrains.intellij',
-          },
+    test('IntelliJ-launched child (macOS __CFBundleIdentifier) is '
+        'recognized as ANSI-capable even when stdout is a pipe', () {
+      // The whole point of the round-8 refactor: IntelliJ Run
+      // Configurations are not TTYs, but their Run Console DOES
+      // render ANSI. The bundle-ID heuristic kicks in to flip
+      // `ansi: true` for known IDE bundles.
+      final caps = EnvironmentDetector.detectCapabilities(
+        envOverride: const {'__CFBundleIdentifier': 'com.jetbrains.intellij'},
+      );
+      // tty depends on the live test runner's stdout; we don't pin
+      // that. We DO pin that ansi flipped on for the IntelliJ case.
+      if (!caps.tty) {
+        expect(
+          caps.ansi,
+          isTrue,
+          reason:
+              'IntelliJ bundle ID without a TTY must enable '
+              'ANSI for the Run Console preset',
         );
-        // tty depends on the live test runner's stdout; we don't pin
-        // that. We DO pin that ansi flipped on for the IntelliJ case.
-        if (!caps.tty) {
-          expect(caps.ansi, isTrue,
-              reason: 'IntelliJ bundle ID without a TTY must enable '
-                  'ANSI for the Run Console preset');
-        }
-      },
-    );
+      }
+    });
 
-    test(
-      'Android Studio child (__CFBundleIdentifier match) → ANSI on '
-      'in non-TTY contexts',
-      () {
-        final caps = EnvironmentDetector.detectCapabilities(
-          envOverride: const {
-            '__CFBundleIdentifier': 'com.google.android.studio',
-          },
-        );
-        if (!caps.tty) {
-          expect(caps.ansi, isTrue);
-        }
-      },
-    );
+    test('Android Studio child (__CFBundleIdentifier match) → ANSI on '
+        'in non-TTY contexts', () {
+      final caps = EnvironmentDetector.detectCapabilities(
+        envOverride: const {
+          '__CFBundleIdentifier': 'com.google.android.studio',
+        },
+      );
+      if (!caps.tty) {
+        expect(caps.ansi, isTrue);
+      }
+    });
 
-    test(
-      'VS Code child (__CFBundleIdentifier match) → ANSI on in '
-      'non-TTY contexts',
-      () {
-        final caps = EnvironmentDetector.detectCapabilities(
-          envOverride: const {
-            '__CFBundleIdentifier': 'com.microsoft.VSCode',
-          },
-        );
-        if (!caps.tty) {
-          expect(caps.ansi, isTrue);
-        }
-      },
-    );
+    test('VS Code child (__CFBundleIdentifier match) → ANSI on in '
+        'non-TTY contexts', () {
+      final caps = EnvironmentDetector.detectCapabilities(
+        envOverride: const {'__CFBundleIdentifier': 'com.microsoft.VSCode'},
+      );
+      if (!caps.tty) {
+        expect(caps.ansi, isTrue);
+      }
+    });
 
-    test(
-      'unknown bundle ID without TTY produces no-ANSI capabilities',
-      () {
-        final caps = EnvironmentDetector.detectCapabilities(
-          envOverride: const {
-            '__CFBundleIdentifier': 'com.example.SomeOtherApp',
-          },
+    test('unknown bundle ID without TTY produces no-ANSI capabilities', () {
+      final caps = EnvironmentDetector.detectCapabilities(
+        envOverride: const {'__CFBundleIdentifier': 'com.example.SomeOtherApp'},
+      );
+      if (!caps.tty) {
+        expect(
+          caps.ansi,
+          isFalse,
+          reason:
+              'unrecognized bundle IDs fall through to the safe '
+              'no-ANSI default — guards against false positives',
         );
-        if (!caps.tty) {
-          expect(caps.ansi, isFalse,
-              reason: 'unrecognized bundle IDs fall through to the safe '
-                  'no-ANSI default — guards against false positives');
-        }
-      },
-    );
+      }
+    });
 
     test('empty env without TTY produces flat-false capabilities', () {
       final caps = EnvironmentDetector.detectCapabilities(
@@ -321,9 +313,7 @@ void main() {
     test('HumanEnvironment compares by capabilities', () {
       const a = HumanEnvironment(_humanFallback);
       const b = HumanEnvironment(_humanFallback);
-      const c = HumanEnvironment(
-        TerminalCapabilities(ansi: true, tty: true),
-      );
+      const c = HumanEnvironment(TerminalCapabilities(ansi: true, tty: true));
       expect(a, equals(b));
       expect(a, isNot(equals(c)));
     });

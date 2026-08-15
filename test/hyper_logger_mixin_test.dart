@@ -206,32 +206,33 @@ void main() {
       expect(crash.errors, isEmpty);
     });
 
-    test(
-      'logError honors LoggerOptions.skipCrashReporting when caller does '
-      'not pass an explicit value',
-      () async {
-        // Round-8 regression case: previously `logError` declared
-        // `bool skipCrashReporting = false`, which always sent a
-        // non-null `false` down the chain. ScopedLogger.error resolves
-        // `skipCrashReporting ?? options.skipCrashReporting`, so the
-        // explicit `false` always won — `LoggerOptions.skipCrashReporting:
-        // true` was silently ignored. Round 8 makes the parameter
-        // nullable and forwards null when the caller doesn't pass it.
-        final crash = _RecordingCrashReporting();
-        HyperLogger.attachServices(crashReporting: crash);
+    test('logError honors LoggerOptions.skipCrashReporting when caller does '
+        'not pass an explicit value', () async {
+      // Round-8 regression case: previously `logError` declared
+      // `bool skipCrashReporting = false`, which always sent a
+      // non-null `false` down the chain. ScopedLogger.error resolves
+      // `skipCrashReporting ?? options.skipCrashReporting`, so the
+      // explicit `false` always won — `LoggerOptions.skipCrashReporting:
+      // true` was silently ignored. Round 8 makes the parameter
+      // nullable and forwards null when the caller doesn't pass it.
+      final crash = _RecordingCrashReporting();
+      HyperLogger.attachServices(crashReporting: crash);
 
-        final host = _ScopedHostWithSkipOptions();
-        host.logError('skipped via options');
-        await Future<void>.delayed(Duration.zero);
+      final host = _ScopedHostWithSkipOptions();
+      host.logError('skipped via options');
+      await Future<void>.delayed(Duration.zero);
 
-        // The host's scope was configured with
-        // `LoggerOptions(skipCrashReporting: true)`. The mixin's
-        // `logError` must NOT override that with its default.
-        expect(crash.errors, isEmpty,
-            reason: 'options.skipCrashReporting=true must be honored when '
-                'logError is called without an explicit override');
-      },
-    );
+      // The host's scope was configured with
+      // `LoggerOptions(skipCrashReporting: true)`. The mixin's
+      // `logError` must NOT override that with its default.
+      expect(
+        crash.errors,
+        isEmpty,
+        reason:
+            'options.skipCrashReporting=true must be honored when '
+            'logError is called without an explicit override',
+      );
+    });
 
     test('logFatal delegates to HyperLogger.fatal', () async {
       final crash = _RecordingCrashReporting();

@@ -150,46 +150,45 @@ void main() {
       expect(() => HyperLogger.info<String>('filtered'), returnsNormally);
     });
 
-    test('throwing interceptor is skipped; the entry still reaches printer',
-        () {
-      final printer = _CountingPrinter();
-      HyperLogger.init(
-        printer: printer,
-        interceptors: [_throwingInterceptor],
-      );
-
-      HyperLogger.info<String>('one');
-      HyperLogger.info<String>('two');
-      HyperLogger.info<String>('three');
-
-      // The throwing interceptor is isolated (skipped), so each entry
-      // continues through the rest of the chain and reaches the printer.
-      // This is the documented LogInterceptor failure-isolation contract.
-      expect(printer.callCount, equals(3));
-    });
-
     test(
-      'a later interceptor still runs after an earlier one throws',
+      'throwing interceptor is skipped; the entry still reaches printer',
       () {
-        var lateCallCount = 0;
         final printer = _CountingPrinter();
         HyperLogger.init(
           printer: printer,
-          interceptors: [
-            _throwingInterceptor,
-            (e) {
-              lateCallCount++;
-              return e;
-            },
-          ],
+          interceptors: [_throwingInterceptor],
         );
 
-        HyperLogger.info<String>('msg');
+        HyperLogger.info<String>('one');
+        HyperLogger.info<String>('two');
+        HyperLogger.info<String>('three');
 
-        expect(lateCallCount, equals(1));
-        expect(printer.callCount, equals(1));
+        // The throwing interceptor is isolated (skipped), so each entry
+        // continues through the rest of the chain and reaches the printer.
+        // This is the documented LogInterceptor failure-isolation contract.
+        expect(printer.callCount, equals(3));
       },
     );
+
+    test('a later interceptor still runs after an earlier one throws', () {
+      var lateCallCount = 0;
+      final printer = _CountingPrinter();
+      HyperLogger.init(
+        printer: printer,
+        interceptors: [
+          _throwingInterceptor,
+          (e) {
+            lateCallCount++;
+            return e;
+          },
+        ],
+      );
+
+      HyperLogger.info<String>('msg');
+
+      expect(lateCallCount, equals(1));
+      expect(printer.callCount, equals(1));
+    });
   });
 
   // ── Delegate that throws synchronously ────────────────────────────────────

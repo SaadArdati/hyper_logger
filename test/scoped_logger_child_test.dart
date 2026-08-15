@@ -122,10 +122,7 @@ void main() {
 
     test('child shares the same options as parent (tag, level, mode)', () {
       final parent = ScopedLogger<String>(
-        options: const LoggerOptions(
-          tag: 'svc',
-          minLevel: LogLevel.warning,
-        ),
+        options: const LoggerOptions(tag: 'svc', minLevel: LogLevel.warning),
       );
       final child = parent.child(context: {'requestId': 'R'});
       expect(child.options, same(parent.options));
@@ -212,41 +209,40 @@ void main() {
       expect(logger.mode, equals(LogMode.silent));
     });
 
-    test(
-      'mixing options and inline params asserts in debug mode '
-      '(silent ignore in release)',
-      () {
-        // Dart `assert(...)` only fires in debug mode (which is what
-        // `dart test` runs by default). The contract: passing both
-        // `options` and any inline knob throws so the user catches the
-        // bug before shipping.
-        expect(
-          () => HyperLogger.child<int>(
-            options: const LoggerOptions(),
-            tag: 'inline-tag',
-          ),
-          throwsA(isA<AssertionError>()),
-        );
-        expect(
-          () => HyperLogger.child<int>(
-            options: const LoggerOptions(),
-            mode: LogMode.silent,
-          ),
-          throwsA(isA<AssertionError>()),
-        );
-      },
-    );
+    test('mixing options and inline params asserts in debug mode '
+        '(silent ignore in release)', () {
+      // Dart `assert(...)` only fires in debug mode (which is what
+      // `dart test` runs by default). The contract: passing both
+      // `options` and any inline knob throws so the user catches the
+      // bug before shipping.
+      expect(
+        () => HyperLogger.child<int>(
+          options: const LoggerOptions(),
+          tag: 'inline-tag',
+        ),
+        throwsA(isA<AssertionError>()),
+      );
+      expect(
+        () => HyperLogger.child<int>(
+          options: const LoggerOptions(),
+          mode: LogMode.silent,
+        ),
+        throwsA(isA<AssertionError>()),
+      );
+    });
   });
 
   group('clock.now() flows end-to-end', () {
-    test('withClock(...) controls LogEntry.time through HyperLogger.info<T>',
-        () {
-      final fakeNow = DateTime.utc(2030, 1, 1, 9, 30);
-      withClock(Clock.fixed(fakeNow), () {
-        HyperLogger.info<String>('hello');
-      });
-      expect(printer.entries.single.time, equals(fakeNow));
-    });
+    test(
+      'withClock(...) controls LogEntry.time through HyperLogger.info<T>',
+      () {
+        final fakeNow = DateTime.utc(2030, 1, 1, 9, 30);
+        withClock(Clock.fixed(fakeNow), () {
+          HyperLogger.info<String>('hello');
+        });
+        expect(printer.entries.single.time, equals(fakeNow));
+      },
+    );
   });
 
   group('Mixin.child()', () {
@@ -267,8 +263,7 @@ void main() {
       expect(child.context, equals({'env': 'prod', 'requestId': 'R'}));
     });
 
-    test('plain host accepts tag/minLevel/mode (parity with static child)',
-        () {
+    test('plain host accepts tag/minLevel/mode (parity with static child)', () {
       final host = _PlainHost();
       final logger = host.child(
         tag: 'mixin-tag',
@@ -324,24 +319,18 @@ void main() {
       },
     );
 
-    test(
-      "scoped host: explicit `mode: LogMode.enabled` is the documented "
-      'carve-out (default-value slip-through)',
-      () {
-        // The mixin assert is value-based, so passing the literal default
-        // mode (`LogMode.enabled`) alongside a scoped host does NOT
-        // trip the assert — the runtime can't distinguish "explicit
-        // default" from "not passed". This test pins the carve-out.
-        final scoped = ScopedLogger<_HostType>(
-          options: const LoggerOptions(tag: 'host-tag'),
-        );
-        final host = _ScopedHost(scoped);
-        expect(
-          () => host.child(mode: LogMode.enabled),
-          returnsNormally,
-        );
-      },
-    );
+    test("scoped host: explicit `mode: LogMode.enabled` is the documented "
+        'carve-out (default-value slip-through)', () {
+      // The mixin assert is value-based, so passing the literal default
+      // mode (`LogMode.enabled`) alongside a scoped host does NOT
+      // trip the assert — the runtime can't distinguish "explicit
+      // default" from "not passed". This test pins the carve-out.
+      final scoped = ScopedLogger<_HostType>(
+        options: const LoggerOptions(tag: 'host-tag'),
+      );
+      final host = _ScopedHost(scoped);
+      expect(() => host.child(mode: LogMode.enabled), returnsNormally);
+    });
   });
 
   group('HyperLogger statics with context:', () {

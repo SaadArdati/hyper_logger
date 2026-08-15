@@ -232,10 +232,7 @@ void main() {
     });
 
     test('non-reserved context keys still flow through', () {
-      final json = withContextKeys({
-        'severity': 'CUSTOM',
-        'requestId': 'R-42',
-      });
+      final json = withContextKeys({'severity': 'CUSTOM', 'requestId': 'R-42'});
       expect(json['severity'], equals('INFO'));
       expect(json['requestId'], equals('R-42'));
     });
@@ -256,25 +253,29 @@ void main() {
       expect(json['severity'], equals('INFO'));
     });
 
-    test('GCP magic fields (httpRequest, trace, etc.) flow through context',
-        () {
-      // These are recognized by Cloud Logging as structured fields. We
-      // do NOT reserve them — users can and should set them via context
-      // to take advantage of Cloud Logging features like trace
-      // correlation and HTTP request rendering.
-      final json = withContextKeys({
-        'httpRequest': {'requestMethod': 'GET', 'status': 200},
-        'logging.googleapis.com/trace':
-            'projects/my-project/traces/abc123',
-        'logging.googleapis.com/spanId': '0000000000000042',
-      });
-      expect(json['httpRequest'], isA<Map<String, dynamic>>());
-      expect(
-        json['logging.googleapis.com/trace'],
-        equals('projects/my-project/traces/abc123'),
-      );
-      expect(json['logging.googleapis.com/spanId'], equals('0000000000000042'));
-    });
+    test(
+      'GCP magic fields (httpRequest, trace, etc.) flow through context',
+      () {
+        // These are recognized by Cloud Logging as structured fields. We
+        // do NOT reserve them — users can and should set them via context
+        // to take advantage of Cloud Logging features like trace
+        // correlation and HTTP request rendering.
+        final json = withContextKeys({
+          'httpRequest': {'requestMethod': 'GET', 'status': 200},
+          'logging.googleapis.com/trace': 'projects/my-project/traces/abc123',
+          'logging.googleapis.com/spanId': '0000000000000042',
+        });
+        expect(json['httpRequest'], isA<Map<String, dynamic>>());
+        expect(
+          json['logging.googleapis.com/trace'],
+          equals('projects/my-project/traces/abc123'),
+        );
+        expect(
+          json['logging.googleapis.com/spanId'],
+          equals('0000000000000042'),
+        );
+      },
+    );
   });
 
   group('GcpJsonPrinter Cloud Error Reporting integration', () {
@@ -285,15 +286,17 @@ void main() {
     }) {
       final captured = <String>[];
       final p = GcpJsonPrinter(output: captured.add);
-      p.log(LogEntry(
-        level: level,
-        message: 'base',
-        object: LogMessage('base', String),
-        loggerName: 'svc',
-        time: DateTime.utc(2026, 5, 8, 12, 0, 0),
-        error: error,
-        stackTrace: stackTrace,
-      ));
+      p.log(
+        LogEntry(
+          level: level,
+          message: 'base',
+          object: LogMessage('base', String),
+          loggerName: 'svc',
+          time: DateTime.utc(2026, 5, 8, 12, 0, 0),
+          error: error,
+          stackTrace: stackTrace,
+        ),
+      );
       return captured.single;
     }
 
@@ -324,10 +327,7 @@ void main() {
     });
 
     test('error without stack trace does NOT embed', () {
-      final line = runError(
-        level: LogLevel.error,
-        error: Exception('boom'),
-      );
+      final line = runError(level: LogLevel.error, error: Exception('boom'));
       final json = jsonDecode(line) as Map<String, dynamic>;
       expect(json['message'], equals('base'));
       expect(json['error'], contains('boom'));

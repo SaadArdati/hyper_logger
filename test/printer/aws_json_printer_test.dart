@@ -180,10 +180,7 @@ void main() {
     });
 
     test('non-reserved context keys still flow through', () {
-      final json = withContextKeys({
-        'level': 'CUSTOM',
-        'requestId': 'R-42',
-      });
+      final json = withContextKeys({'level': 'CUSTOM', 'requestId': 'R-42'});
       expect(json['level'], equals('WARN'));
       expect(json['requestId'], equals('R-42'));
     });
@@ -206,15 +203,17 @@ void main() {
     }) {
       final captured = <String>[];
       final p = AwsJsonPrinter(output: captured.add);
-      p.log(LogEntry(
-        level: level,
-        message: 'base',
-        object: LogMessage('base', String),
-        loggerName: 'svc',
-        time: DateTime.utc(2026, 5, 8, 12, 0, 0),
-        error: error,
-        stackTrace: stackTrace,
-      ));
+      p.log(
+        LogEntry(
+          level: level,
+          message: 'base',
+          object: LogMessage('base', String),
+          loggerName: 'svc',
+          time: DateTime.utc(2026, 5, 8, 12, 0, 0),
+          error: error,
+          stackTrace: stackTrace,
+        ),
+      );
       return captured.single;
     }
 

@@ -247,7 +247,8 @@ void main() {
       expect(
         printer.disposeCalls,
         1,
-        reason: 'reset() must dispose the previous printer to avoid '
+        reason:
+            'reset() must dispose the previous printer to avoid '
             'leaking timers / file handles across test setUp/tearDown',
       );
     });
@@ -321,8 +322,11 @@ void main() {
       HyperLogger.reset();
       HyperLogger.setLogLevel(LogLevel.warning);
       // No `init()` between — the next call must NOT reset to ALL.
-      expect(HyperLogger.isEnabled(LogLevel.info), isFalse,
-          reason: 'setLogLevel before init must persist');
+      expect(
+        HyperLogger.isEnabled(LogLevel.info),
+        isFalse,
+        reason: 'setLogLevel before init must persist',
+      );
       expect(HyperLogger.isEnabled(LogLevel.warning), isTrue);
     });
   });

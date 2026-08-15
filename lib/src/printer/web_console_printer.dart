@@ -278,5 +278,7 @@ class WebConsolePrinter implements LogPrinter {
   }
 
   @override
-  void dispose() {/* stateless */}
+  void dispose() {
+    /* stateless */
+  }
 }

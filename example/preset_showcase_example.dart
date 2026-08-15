@@ -17,14 +17,10 @@ void main() {
     '(emoji + color + prefix, no box)',
   );
   _demo(
-    LogPrinterPresets.human(
-      const TerminalCapabilities(ansi: true, tty: false),
-    ),
+    LogPrinterPresets.human(const TerminalCapabilities(ansi: true, tty: false)),
   );
 
-  _section(
-    'HUMAN(no ansi) — piped/file shape (timestamp + emoji + prefix)',
-  );
+  _section('HUMAN(no ansi) — piped/file shape (timestamp + emoji + prefix)');
   _demo(
     LogPrinterPresets.human(
       const TerminalCapabilities(ansi: false, tty: false),

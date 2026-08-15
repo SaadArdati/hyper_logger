@@ -155,13 +155,11 @@ void _demoCustomColors() {
   ]);
 
   final entries = [
-    _entryWithData(
-      LogLevel.info,
-      'Positions loaded',
-      PortfolioCubit,
-      'load',
-      {'count': 12, 'totalValue': 45230.50, 'currency': 'USD'},
-    ),
+    _entryWithData(LogLevel.info, 'Positions loaded', PortfolioCubit, 'load', {
+      'count': 12,
+      'totalValue': 45230.50,
+      'currency': 'USD',
+    }),
     _entry(
       LogLevel.warning,
       'Rate limit approaching threshold',
@@ -194,13 +192,10 @@ void _demoJson(GcpJsonPrinter printer) {
   final entries = [
     _entry(LogLevel.info, 'User logged in successfully', AuthService, 'login'),
     _entry(LogLevel.warning, 'Rate limit approaching', ApiClient, 'request'),
-    _entryWithData(
-      LogLevel.info,
-      'Positions loaded',
-      PortfolioCubit,
-      'load',
-      {'count': 12, 'totalValue': 45230.50},
-    ),
+    _entryWithData(LogLevel.info, 'Positions loaded', PortfolioCubit, 'load', {
+      'count': 12,
+      'totalValue': 45230.50,
+    }),
     _entryWithError(
       LogLevel.error,
       'Request failed',
@@ -364,11 +359,7 @@ void _demoDocData() {
     'Daily intake logged',
     CoffeeTracker,
     'track',
-    {
-      'cups': 4,
-      'regret': false,
-      'productivity': 'questionable',
-    },
+    {'cups': 4, 'regret': false, 'productivity': 'questionable'},
   );
   for (final line in printer.format(entry)) {
     print(line);
@@ -405,11 +396,7 @@ void _demoDocScoped() {
   final entry3 = LogEntry(
     level: LogLevel.info,
     message: '[sendgrid] Email queued',
-    object: LogMessage(
-      '[sendgrid] Email queued',
-      Api,
-      method: 'sendEmail',
-    ),
+    object: LogMessage('[sendgrid] Email queued', Api, method: 'sendEmail'),
     loggerName: 'Api',
     time: DateTime(2026, 4, 6, 10, 30, 2),
   );

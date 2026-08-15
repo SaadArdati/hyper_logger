@@ -25,7 +25,11 @@ class LogRenderer {
     final borderStyle = resolver.resolveBorder(style, extraction.level);
 
     final String? timestampStr = style.timestamp
-        ? _formatTimestamp(extraction.time, extraction.level, style.dateTimeFormatter)
+        ? _formatTimestamp(
+            extraction.time,
+            extraction.level,
+            style.dateTimeFormatter,
+          )
         : null;
 
     final sections = <LogSection>[

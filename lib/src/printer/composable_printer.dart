@@ -110,5 +110,7 @@ class ComposablePrinter implements LogPrinter {
   }
 
   @override
-  void dispose() {/* stateless extraction/rendering */}
+  void dispose() {
+    /* stateless extraction/rendering */
+  }
 }

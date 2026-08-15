@@ -19,5 +19,7 @@ class DirectPrinter implements LogPrinter {
   }
 
   @override
-  void dispose() {/* stateless */}
+  void dispose() {
+    /* stateless */
+  }
 }

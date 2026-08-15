@@ -39,7 +39,10 @@ void main() {
 
     test('returned element is valid JSON', () {
       final printer = AzureJsonPrinter(output: (_) {});
-      expect(() => jsonDecode(printer.format(_record()).first), returnsNormally);
+      expect(
+        () => jsonDecode(printer.format(_record()).first),
+        returnsNormally,
+      );
     });
   });
 
@@ -75,11 +78,14 @@ void main() {
   });
 
   group('AzureJsonPrinter shape conformance', () {
-    test('uses "time" timestamp key (Application Insights envelope convention)', () {
-      final json = _parse(_record());
-      expect(json.containsKey('time'), isTrue);
-      expect(json.containsKey('timestamp'), isFalse);
-    });
+    test(
+      'uses "time" timestamp key (Application Insights envelope convention)',
+      () {
+        final json = _parse(_record());
+        expect(json.containsKey('time'), isTrue);
+        expect(json.containsKey('timestamp'), isFalse);
+      },
+    );
 
     test('"time" is ISO-8601 UTC', () {
       final json = _parse(_record());
@@ -120,16 +126,21 @@ void main() {
 
   group('AzureJsonPrinter context (customDimensions)', () {
     test('context lands inside customDimensions, not at root', () {
-      final json = _parse(_record(
-        object: const LogMessage(
-          'msg',
-          dynamic,
-          context: {'requestId': 'abc-123', 'userId': 'u-42'},
+      final json = _parse(
+        _record(
+          object: const LogMessage(
+            'msg',
+            dynamic,
+            context: {'requestId': 'abc-123', 'userId': 'u-42'},
+          ),
         ),
-      ));
+      );
 
-      expect(json.containsKey('requestId'), isFalse,
-          reason: 'context should be nested, not flat');
+      expect(
+        json.containsKey('requestId'),
+        isFalse,
+        reason: 'context should be nested, not flat',
+      );
       expect(json.containsKey('userId'), isFalse);
 
       final cd = json['customDimensions'] as Map<String, dynamic>;
@@ -143,26 +154,28 @@ void main() {
     });
 
     test('omits customDimensions when context is empty', () {
-      final json = _parse(_record(
-        object: const LogMessage('msg', dynamic, context: {}),
-      ));
+      final json = _parse(
+        _record(object: const LogMessage('msg', dynamic, context: {})),
+      );
       expect(json.containsKey('customDimensions'), isFalse);
     });
 
     test('drops reserved keys from context', () {
-      final json = _parse(_record(
-        object: const LogMessage(
-          'msg',
-          dynamic,
-          context: {
-            'severityLevel': 99, // reserved
-            'message': 'BUG', // reserved
-            'time': 'BUG', // reserved
-            'customDimensions': 'BUG', // reserved
-            'safe': 'value',
-          },
+      final json = _parse(
+        _record(
+          object: const LogMessage(
+            'msg',
+            dynamic,
+            context: {
+              'severityLevel': 99, // reserved
+              'message': 'BUG', // reserved
+              'time': 'BUG', // reserved
+              'customDimensions': 'BUG', // reserved
+              'safe': 'value',
+            },
+          ),
         ),
-      ));
+      );
       // Reserved keys are not surfaced anywhere
       expect(json['severityLevel'], 1, reason: 'must reflect the real level');
       expect(json['message'], 'msg', reason: 'must reflect the real message');
@@ -179,12 +192,14 @@ void main() {
   group('AzureJsonPrinter error/stackTrace embedding', () {
     test('error severity embeds stack trace in message', () {
       final st = StackTrace.fromString('at Foo.bar (file.dart:1:2)');
-      final json = _parse(_record(
-        message: 'failure',
-        level: LogLevel.error,
-        error: Exception('boom'),
-        stackTrace: st,
-      ));
+      final json = _parse(
+        _record(
+          message: 'failure',
+          level: LogLevel.error,
+          error: Exception('boom'),
+          stackTrace: st,
+        ),
+      );
       expect(json['message'], contains('failure'));
       expect(json['message'], contains('boom'));
       expect(json['message'], contains('Foo.bar'));
@@ -192,24 +207,28 @@ void main() {
 
     test('fatal severity embeds stack trace in message', () {
       final st = StackTrace.fromString('at Foo.bar (file.dart:1:2)');
-      final json = _parse(_record(
-        message: 'failure',
-        level: LogLevel.fatal,
-        error: Exception('boom'),
-        stackTrace: st,
-      ));
+      final json = _parse(
+        _record(
+          message: 'failure',
+          level: LogLevel.fatal,
+          error: Exception('boom'),
+          stackTrace: st,
+        ),
+      );
       expect(json['message'], contains('boom'));
       expect(json['message'], contains('Foo.bar'));
     });
 
     test('warning severity does NOT embed stack trace in message', () {
       final st = StackTrace.fromString('at Foo.bar (file.dart:1:2)');
-      final json = _parse(_record(
-        message: 'just a warning',
-        level: LogLevel.warning,
-        error: Exception('boom'),
-        stackTrace: st,
-      ));
+      final json = _parse(
+        _record(
+          message: 'just a warning',
+          level: LogLevel.warning,
+          error: Exception('boom'),
+          stackTrace: st,
+        ),
+      );
       expect(json['message'], 'just a warning');
       expect(json['error'], contains('boom'));
       expect(json['stackTrace'], contains('Foo.bar'));

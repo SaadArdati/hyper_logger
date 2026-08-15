@@ -25,10 +25,7 @@ class _ThrowingPrinter implements LogPrinter {
   int logCalls = 0;
   int disposeCalls = 0;
 
-  _ThrowingPrinter({
-    this.error = 'boom',
-    this.throwOnDispose = false,
-  });
+  _ThrowingPrinter({this.error = 'boom', this.throwOnDispose = false});
 
   @override
   void log(LogEntry entry) {
@@ -105,21 +102,27 @@ void main() {
 
       expect(before.entries, hasLength(1));
       expect(boom.logCalls, 1);
-      expect(after.entries, hasLength(1),
-          reason: 'after-printer must still receive when middle throws');
+      expect(
+        after.entries,
+        hasLength(1),
+        reason: 'after-printer must still receive when middle throws',
+      );
     });
 
-    test('multiple throwing children are all delivered-to before the throw', () {
-      final boom1 = _ThrowingPrinter(error: 'one');
-      final ok = _RecordingPrinter('ok');
-      final boom2 = _ThrowingPrinter(error: 'two');
-      final multi = MultiPrinter([boom1, ok, boom2]);
+    test(
+      'multiple throwing children are all delivered-to before the throw',
+      () {
+        final boom1 = _ThrowingPrinter(error: 'one');
+        final ok = _RecordingPrinter('ok');
+        final boom2 = _ThrowingPrinter(error: 'two');
+        final multi = MultiPrinter([boom1, ok, boom2]);
 
-      expect(() => multi.log(_entry()), throwsA(isA<MultiPrinterError>()));
-      expect(boom1.logCalls, 1);
-      expect(ok.entries, hasLength(1));
-      expect(boom2.logCalls, 1);
-    });
+        expect(() => multi.log(_entry()), throwsA(isA<MultiPrinterError>()));
+        expect(boom1.logCalls, 1);
+        expect(ok.entries, hasLength(1));
+        expect(boom2.logCalls, 1);
+      },
+    );
 
     test('all-children-OK does NOT throw', () {
       final a = _RecordingPrinter('a');
@@ -176,10 +179,7 @@ void main() {
       } on MultiPrinterError catch (e) {
         captured = e;
       }
-      expect(
-        () => captured!.childErrors.clear(),
-        throwsUnsupportedError,
-      );
+      expect(() => captured!.childErrors.clear(), throwsUnsupportedError);
     });
 
     test('singular grammar in toString when exactly one child throws', () {
@@ -234,21 +234,29 @@ void main() {
       final a = _RecordingPrinter('a');
       final multi = MultiPrinter([a]);
 
-      expect(() => multi.printers.add(_RecordingPrinter('sneak')),
-          throwsUnsupportedError);
+      expect(
+        () => multi.printers.add(_RecordingPrinter('sneak')),
+        throwsUnsupportedError,
+      );
     });
 
-    test('mutating the source list after construction does not affect the printer', () {
-      final source = [_RecordingPrinter('a'), _RecordingPrinter('b')];
-      final multi = MultiPrinter(source);
+    test(
+      'mutating the source list after construction does not affect the printer',
+      () {
+        final source = [_RecordingPrinter('a'), _RecordingPrinter('b')];
+        final multi = MultiPrinter(source);
 
-      source.add(_RecordingPrinter('c'));
-      source.removeAt(0);
+        source.add(_RecordingPrinter('c'));
+        source.removeAt(0);
 
-      expect(multi.printers, hasLength(2),
-          reason: 'MultiPrinter must snapshot the input at construction');
-      expect(multi.printers[0], isA<_RecordingPrinter>());
-    });
+        expect(
+          multi.printers,
+          hasLength(2),
+          reason: 'MultiPrinter must snapshot the input at construction',
+        );
+        expect(multi.printers[0], isA<_RecordingPrinter>());
+      },
+    );
   });
 
   group('MultiPrinter composition', () {
@@ -300,30 +308,27 @@ void main() {
       HyperLogger.reset();
     });
 
-    test(
-      'a child throwing surfaces via setPipelineErrorHandler '
-      '(no silent swallow)',
-      () {
-        final ok = _RecordingPrinter('ok');
-        final boom = _ThrowingPrinter(error: 'cloud-down');
-        final reported = <(String, Object)>[];
+    test('a child throwing surfaces via setPipelineErrorHandler '
+        '(no silent swallow)', () {
+      final ok = _RecordingPrinter('ok');
+      final boom = _ThrowingPrinter(error: 'cloud-down');
+      final reported = <(String, Object)>[];
 
-        HyperLogger.setPipelineErrorHandler((source, error, _) {
-          reported.add((source, error));
-        });
-        HyperLogger.init(printer: MultiPrinter([ok, boom]));
+      HyperLogger.setPipelineErrorHandler((source, error, _) {
+        reported.add((source, error));
+      });
+      HyperLogger.init(printer: MultiPrinter([ok, boom]));
 
-        HyperLogger.info<String>('hello');
+      HyperLogger.info<String>('hello');
 
-        // The OK child got the entry...
-        expect(ok.entries, hasLength(1));
-        // ...and the throwing child's failure was reported up the
-        // pipeline rather than silently dropped.
-        expect(reported, hasLength(1));
-        expect(reported.first.$1, 'printer.log');
-        expect(reported.first.$2, isA<MultiPrinterError>());
-      },
-    );
+      // The OK child got the entry...
+      expect(ok.entries, hasLength(1));
+      // ...and the throwing child's failure was reported up the
+      // pipeline rather than silently dropped.
+      expect(reported, hasLength(1));
+      expect(reported.first.$1, 'printer.log');
+      expect(reported.first.$2, isA<MultiPrinterError>());
+    });
   });
 }
 
