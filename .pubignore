@@ -1,3 +1,8 @@
+# pub.dev rewrites relative README image paths to the `repository` URL and
+# serves them from GitHub, so shipping the PNGs would add ~1.1 MB to every
+# `pub get` for images no renderer ever reads from the archive.
+assets/
+
 benchmark/
 tool/
 coverage/

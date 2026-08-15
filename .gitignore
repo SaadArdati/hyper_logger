@@ -20,5 +20,6 @@ firebase-debug.log
 # Coverage
 coverage/
 
-# Tool dependencies
-tool/
+# Tool dependencies (the scripts themselves are tracked; render_preview.js
+# npm-installs puppeteer into tool/ on first run)
+tool/node_modules/

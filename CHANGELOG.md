@@ -1,6 +1,17 @@
 ## 0.2.1
 
 - Shorten the package description to satisfy pub.dev's character guideline.
+- Compress assets & add .pubignore.
+- `LogPrinterPresets.automatic`, `.human`, `.terminal`, and `.ci` now
+  forward the full `ComposablePrinter` tuning surface — `methodCount`,
+  `errorMethodCount`, `excludePaths`, `showAsyncGaps`, and
+  `suppressTypeNames`. Previously a preset only took `output`, so tuning
+  stack-trace depth or frame filtering meant abandoning the preset and
+  composing the decorator list by hand. On `automatic` the parameters
+  reach the `ci`/`human` arms only; the cloud arms emit a raw
+  `stackTrace.toString()` and have nothing to tune.
+- `ComposablePrinter.defaultMethodCount` — the default frame count (10),
+  exposed so wrappers can mirror it instead of copying the literal.
 
 ## 0.2.0
 

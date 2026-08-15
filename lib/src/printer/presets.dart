@@ -23,137 +23,188 @@ import 'log_printer.dart';
 /// | [gcp]       | [GcpJsonPrinter]    | Google Cloud Logging                     |
 /// | [aws]       | [AwsJsonPrinter]    | AWS CloudWatch / Lambda                  |
 /// | [azure]     | [AzureJsonPrinter]  | Azure App Service / Functions / Container Apps |
+///
+/// Every preset takes an `output` sink; the [ComposablePrinter]-backed ones
+/// ([automatic], [human], [terminal], [ci]) also forward that class's
+/// tuning parameters.
 final class LogPrinterPresets {
   const LogPrinterPresets._();
 
   /// Detects the current [RuntimeEnvironment] and returns the best printer.
   ///
-  /// Detection order: GCP → AWS → Azure → CI → human (capability-
-  /// tuned). See [EnvironmentDetector] for details on each signal.
+  /// Detection order: GCP → AWS → Azure → CI → human. See
+  /// [EnvironmentDetector] for the signal behind each. This is the
+  /// default when [HyperLogger.init] is called without an explicit
+  /// printer on native platforms.
   ///
-  /// This is the default when [HyperLogger.init] is called without an
-  /// explicit printer on native platforms.
-  ///
-  /// The `default` arm exists because [RuntimeEnvironment] is not
-  /// `sealed` — a future leaf added in a later release would otherwise
-  /// produce a non-exhaustive switch. The fallback is a human preset
-  /// built from the current stdout's capabilities, which is a
-  /// reasonable best-effort for unknown environments.
-  static LogPrinter automatic({LogOutput? output}) {
+  /// {@macro hyper_logger.presets.tuning} Only the [ci] and [human]
+  /// arms use them; the cloud arms emit a raw `stackTrace.toString()`
+  /// and have no extraction pipeline to tune.
+  static LogPrinter automatic({
+    LogOutput? output,
+    int methodCount = ComposablePrinter.defaultMethodCount,
+    int? errorMethodCount,
+    List<String> excludePaths = const [],
+    bool showAsyncGaps = false,
+    bool? suppressTypeNames,
+  }) {
+    ComposablePrinter buildHuman(TerminalCapabilities capabilities) => human(
+      capabilities,
+      output: output,
+      methodCount: methodCount,
+      errorMethodCount: errorMethodCount,
+      excludePaths: excludePaths,
+      showAsyncGaps: showAsyncGaps,
+      suppressTypeNames: suppressTypeNames,
+    );
+
     final env = _cachedEnvironment ??= const EnvironmentDetector().detect();
     return switch (env) {
       GcpEnvironment() => gcp(output: output),
       AwsEnvironment() => aws(output: output),
       AzureEnvironment() => azure(output: output),
-      CiEnvironment() => ci(output: output),
-      HumanEnvironment(:final capabilities) => human(
-        capabilities,
+      CiEnvironment() => ci(
         output: output,
+        methodCount: methodCount,
+        errorMethodCount: errorMethodCount,
+        excludePaths: excludePaths,
+        showAsyncGaps: showAsyncGaps,
+        suppressTypeNames: suppressTypeNames,
       ),
-      _ => human(EnvironmentDetector.detectCapabilities(), output: output),
+      HumanEnvironment(:final capabilities) => buildHuman(capabilities),
+      // [RuntimeEnvironment] isn't `sealed`, so a leaf added in a later
+      // release would otherwise make this switch non-exhaustive.
+      _ => buildHuman(EnvironmentDetector.detectCapabilities()),
     };
   }
 
-  /// Cached [EnvironmentDetector.detect] result. The runtime environment
-  /// doesn't change over a process's lifetime, so a repeated
-  /// [automatic] call can reuse the first detection.
+  /// Cached [EnvironmentDetector.detect] result. The environment can't
+  /// change over a process's lifetime, so repeat [automatic] calls
+  /// reuse the first detection.
   static RuntimeEnvironment? _cachedEnvironment;
 
-  /// Resets the cached environment-detection result. Test-only — tests
-  /// that toggle process env vars (`GCP_PROJECT`, `AWS_REGION`, etc.)
-  /// to exercise the dispatch matrix must clear the cache between
-  /// permutations.
+  /// Resets the cached environment-detection result. Test-only: tests
+  /// that toggle `GCP_PROJECT`, `AWS_REGION`, etc. to exercise the
+  /// dispatch matrix must clear the cache between permutations.
   @visibleForTesting
   static void resetEnvironmentCache() {
     _cachedEnvironment = null;
   }
 
-  /// Builds a human-readable preset by composing decorators based on
-  /// the supplied [TerminalCapabilities].
+  /// Builds a human-readable preset by composing decorators from the
+  /// supplied [TerminalCapabilities]. Emoji and prefix are always on;
+  /// the rest follow the capability bits:
   ///
-  /// Composition rules (from the orthogonal capability bits):
-  /// - Box drawing is added when both [TerminalCapabilities.ansi]
-  ///   and [TerminalCapabilities.tty] are true (a real, ANSI-capable
-  ///   terminal). Box edges depend on stable line widths, which IDE
-  ///   Run Consoles and piped output don't reliably provide. The box's
-  ///   `lineLength` honors [TerminalCapabilities.width] when present
-  ///   so wide and narrow terminals both get appropriately-sized
-  ///   borders; otherwise falls back to 120 columns.
-  /// - ANSI color is added whenever [TerminalCapabilities.ansi] is
-  ///   true. Works in any ANSI sink, including IDE Run Consoles.
-  /// - Inline timestamp is added when [TerminalCapabilities.ansi]
-  ///   is `false`. Without ANSI we usually have no host UI showing the
-  ///   time per row (piped to file, low-feature shell), so embedding
-  ///   the timestamp inline is the only way to keep it. With ANSI the
-  ///   host (terminal scroll-back, IDE column) tracks time itself.
-  /// - Emoji and prefix are always present.
+  /// | Decorator | Added when   | Why                                     |
+  /// |-----------|--------------|-----------------------------------------|
+  /// | box       | `ansi && tty`| Borders need a stable line width, which IDE consoles and pipes don't provide. Sized from [TerminalCapabilities.width], else 120. |
+  /// | color     | `ansi`       | Any ANSI sink renders it, IDE consoles included. |
+  /// | timestamp | `!ansi`      | Without ANSI there's usually no host UI showing the time per row, so it has to travel inline. |
   ///
-  /// Pass an explicit [TerminalCapabilities] to override what
-  /// [EnvironmentDetector.detectCapabilities] would have produced —
-  /// useful when piping to a sink whose capabilities differ from
-  /// stdout's.
+  /// Pass an explicit [TerminalCapabilities] when the sink's
+  /// capabilities differ from stdout's (what
+  /// [EnvironmentDetector.detectCapabilities] measures).
+  ///
+  /// {@template hyper_logger.presets.tuning}
+  /// [methodCount], [errorMethodCount], [excludePaths], [showAsyncGaps],
+  /// and [suppressTypeNames] pass straight through to the
+  /// [ComposablePrinter] constructor, which documents each.
+  /// {@endtemplate}
   static ComposablePrinter human(
     TerminalCapabilities capabilities, {
     LogOutput? output,
+    int methodCount = ComposablePrinter.defaultMethodCount,
+    int? errorMethodCount,
+    List<String> excludePaths = const [],
+    bool showAsyncGaps = false,
+    bool? suppressTypeNames,
   }) {
     final useBox = capabilities.ansi && capabilities.tty;
     final useColor = capabilities.ansi;
     final useTimestamp = !capabilities.ansi;
-    // Clamp the width to a sane minimum so a pathological terminal reporting
-    // `terminalColumns: 1` (or 0) doesn't produce degenerate borders. The
-    // clamp leaves enough room for box characters + the level prefix + at
-    // least a few chars of message.
+    // A terminal reporting `terminalColumns: 1` (or 0) would otherwise
+    // produce degenerate borders. The floor leaves room for the box
+    // characters, the level prefix, and a few chars of message.
     final boxWidth = (capabilities.width ?? 120).clamp(40, 1024);
 
-    return ComposablePrinter([
-      if (useTimestamp) const TimestampDecorator(),
-      const EmojiDecorator(),
-      if (useBox) BoxDecorator(lineLength: boxWidth),
-      if (useColor) const AnsiColorDecorator(),
-      const PrefixDecorator(),
-    ], output: output ?? print);
+    return ComposablePrinter(
+      [
+        if (useTimestamp) const TimestampDecorator(),
+        const EmojiDecorator(),
+        if (useBox) BoxDecorator(lineLength: boxWidth),
+        if (useColor) const AnsiColorDecorator(),
+        const PrefixDecorator(),
+      ],
+      output: output ?? print,
+      methodCount: methodCount,
+      errorMethodCount: errorMethodCount,
+      excludePaths: excludePaths,
+      showAsyncGaps: showAsyncGaps,
+      suppressTypeNames: suppressTypeNames,
+    );
   }
 
-  /// Shorthand for a full real-terminal preset:
-  /// `human(TerminalCapabilities(ansi: true, tty: true))`.
-  ///
-  /// Applies: [EmojiDecorator] · [BoxDecorator] · [AnsiColorDecorator] ·
+  /// Shorthand for `human(TerminalCapabilities(ansi: true, tty: true))`:
+  /// [EmojiDecorator] · [BoxDecorator] · [AnsiColorDecorator] ·
   /// [PrefixDecorator].
-  static ComposablePrinter terminal({LogOutput? output}) =>
-      human(const TerminalCapabilities(ansi: true, tty: true), output: output);
+  ///
+  /// {@macro hyper_logger.presets.tuning}
+  static ComposablePrinter terminal({
+    LogOutput? output,
+    int methodCount = ComposablePrinter.defaultMethodCount,
+    int? errorMethodCount,
+    List<String> excludePaths = const [],
+    bool showAsyncGaps = false,
+    bool? suppressTypeNames,
+  }) => human(
+    const TerminalCapabilities(ansi: true, tty: true),
+    output: output,
+    methodCount: methodCount,
+    errorMethodCount: errorMethodCount,
+    excludePaths: excludePaths,
+    showAsyncGaps: showAsyncGaps,
+    suppressTypeNames: suppressTypeNames,
+  );
 
   /// CI/CD preset — `<ISO-8601> [LEVEL] [Class.method] Message`.
   ///
-  /// Applies: [TimestampDecorator] · [PrefixDecorator]. No color or
-  /// box so log lines are parseable as plain text by `grep`/CI viewers.
-  static ComposablePrinter ci({LogOutput? output}) => ComposablePrinter(const [
-    TimestampDecorator(),
-    PrefixDecorator(),
-  ], output: output ?? print);
-
-  /// Returns a [GcpJsonPrinter] for Google Cloud Logging structured output.
+  /// [TimestampDecorator] · [PrefixDecorator]. No color or box, so lines
+  /// stay parseable by `grep` and CI log viewers.
   ///
-  /// Use on Cloud Run, GKE, App Engine, and Cloud Functions where stdout is
-  /// parsed as structured logs.
+  /// {@macro hyper_logger.presets.tuning}
+  static ComposablePrinter ci({
+    LogOutput? output,
+    int methodCount = ComposablePrinter.defaultMethodCount,
+    int? errorMethodCount,
+    List<String> excludePaths = const [],
+    bool showAsyncGaps = false,
+    bool? suppressTypeNames,
+  }) => ComposablePrinter(
+    const [TimestampDecorator(), PrefixDecorator()],
+    output: output ?? print,
+    methodCount: methodCount,
+    errorMethodCount: errorMethodCount,
+    excludePaths: excludePaths,
+    showAsyncGaps: showAsyncGaps,
+    suppressTypeNames: suppressTypeNames,
+  );
+
+  /// Structured JSON for Google Cloud Logging. Use on Cloud Run, GKE,
+  /// App Engine, and Cloud Functions, where stdout is parsed as
+  /// structured logs. See [GcpJsonPrinter] for the field shape.
   static GcpJsonPrinter gcp({LogOutput? output}) =>
       GcpJsonPrinter(output: output ?? print);
 
-  /// Returns an [AwsJsonPrinter] for AWS CloudWatch Logs.
-  ///
-  /// Use on Lambda, ECS, EKS, and EC2 instances configured to ship stdout
-  /// to CloudWatch.
+  /// Structured JSON for AWS CloudWatch Logs. Use on Lambda, ECS, EKS,
+  /// and EC2 instances shipping stdout to CloudWatch. See
+  /// [AwsJsonPrinter] for the field shape.
   static AwsJsonPrinter aws({LogOutput? output}) =>
       AwsJsonPrinter(output: output ?? print);
 
-  /// Returns an [AzureJsonPrinter] for Azure Application Insights' `traces`
-  /// table — `severityLevel` (numeric), `message`, `time`, and a nested
-  /// `customDimensions` map for context.
-  ///
-  /// Use on Azure App Service, Functions, and Container Apps where
-  /// stdout is scraped by Container Insights / the OpenTelemetry log
-  /// exporter / a custom-log-file data collector and routed into
-  /// Application Insights. See the [AzureJsonPrinter] dartdoc for the
-  /// exact field shape and KQL query patterns.
+  /// Structured JSON for Azure Application Insights' `traces` table. Use
+  /// on App Service, Functions, and Container Apps, where stdout is
+  /// scraped into Application Insights. See [AzureJsonPrinter] for the
+  /// field shape and KQL query patterns.
   static AzureJsonPrinter azure({LogOutput? output}) =>
       AzureJsonPrinter(output: output ?? print);
 }

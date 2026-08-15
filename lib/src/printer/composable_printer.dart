@@ -27,6 +27,13 @@ import 'log_printer.dart';
 /// ### Output
 /// [output] defaults to [print] and can be overridden for testing.
 class ComposablePrinter implements LogPrinter {
+  /// Default number of stack-trace frames rendered for a non-error log.
+  ///
+  /// Exposed so callers that wrap this constructor — `LogPrinterPresets`
+  /// in particular — can mirror the default in their own signatures
+  /// instead of hardcoding a second copy of the number.
+  static const int defaultMethodCount = 10;
+
   /// The decorators applied at construction to build [style].
   final List<LogDecorator> decorators;
 
@@ -42,9 +49,25 @@ class ComposablePrinter implements LogPrinter {
   late final StyleResolver _resolver;
   late final LogRenderer _renderer;
 
+  /// Tuning for the extraction stage:
+  ///
+  /// - [methodCount] — stack frames rendered for a normal log. `0`
+  ///   skips stack rendering entirely.
+  /// - [errorMethodCount] — frames rendered when the entry carries an
+  ///   error; falls back to [methodCount] when null, so normal logs can
+  ///   stay terse while failures get a deep trace.
+  /// - [excludePaths] — libraries whose frames are dropped, on top of
+  ///   the always-excluded `package:logging/` and `package:hyper_logger/`.
+  ///   An entry matches a library exactly or as a directory prefix, so
+  ///   write `'package:noisy'`, not `'package:noisy/'`.
+  /// - [showAsyncGaps] — separate the traces of a chain with an
+  ///   `asynchronous gap` row instead of splicing them together.
+  /// - [suppressTypeNames] — skip rendering `Type.toString()` into the
+  ///   class-name section, for builds where type names are minified.
+  ///   Defaults to [ContentExtractor.defaultSuppressTypeNames].
   ComposablePrinter(
     this.decorators, {
-    int methodCount = 10,
+    int methodCount = defaultMethodCount,
     int? errorMethodCount,
     List<String> excludePaths = const [],
     bool showAsyncGaps = false,

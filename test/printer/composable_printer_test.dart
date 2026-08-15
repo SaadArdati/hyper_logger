@@ -1,7 +1,31 @@
 import 'package:hyper_logger/hyper_logger.dart';
+import 'package:stack_trace/stack_trace.dart';
 import 'package:test/test.dart';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+/// Synthetic frames — a real `StackTrace.current` varies by platform and
+/// test runner, which would make frame counts unstable.
+final _frames = [
+  Frame(Uri.parse('package:app/a.dart'), 1, 1, 'A.one'),
+  Frame(Uri.parse('package:app/b.dart'), 2, 1, 'B.two'),
+  Frame(Uri.parse('package:noisy/c.dart'), 3, 1, 'C.three'),
+  Frame(Uri.parse('package:app/d.dart'), 4, 1, 'D.four'),
+];
+
+Chain _chain(List<Frame> frames) => Chain([Trace(frames)]);
+
+/// A two-[Trace] chain — the shape `showAsyncGaps` acts on.
+Chain _twoTraceChain() =>
+    Chain([Trace(_frames.take(2).toList()), Trace(_frames.skip(2).toList())]);
+
+/// The rendered `#N  member  library  line:col` rows of a formatted entry.
+/// Matched anywhere in the line so boxed output (which prefixes each row
+/// with a border glyph) counts the same as plain output.
+final _framePattern = RegExp(r'#\d+\s');
+
+List<String> _frameLines(String formatted) =>
+    formatted.split('\n').where(_framePattern.hasMatch).toList();
 
 /// Builds a minimal [LogEntry].
 LogEntry _record({
@@ -265,6 +289,94 @@ void main() {
       p.log(_record(message: 'from preset'));
       expect(captured, isNotEmpty);
       expect(captured.any((l) => l.contains('from preset')), isTrue);
+    });
+  });
+
+  // ── Preset → ComposablePrinter parameter forwarding ──────────────────────────
+
+  // Every ComposablePrinter tuning knob is a plain pass-through, so the
+  // failure mode is a silently-dropped argument rather than a crash.
+  // These assert the observable effect of each one through a preset.
+  group('preset tuning parameters reach the extraction pipeline', () {
+    test('methodCount: 0 suppresses the stack-trace section', () {
+      final p = LogPrinterPresets.ci(methodCount: 0);
+      final out = _format(p, _record(stackTrace: _chain(_frames)));
+      expect(out, isNot(contains('#0')));
+    });
+
+    test('methodCount caps the frames rendered', () {
+      final p = LogPrinterPresets.ci(methodCount: 2);
+      final out = _format(p, _record(stackTrace: _chain(_frames)));
+      expect(_frameLines(out), hasLength(2));
+    });
+
+    test('errorMethodCount applies when the entry carries an error', () {
+      final p = LogPrinterPresets.ci(methodCount: 1, errorMethodCount: 3);
+      final out = _format(
+        p,
+        _record(error: 'boom', stackTrace: _chain(_frames)),
+      );
+      expect(_frameLines(out), hasLength(3));
+    });
+
+    test('errorMethodCount is ignored for a non-error entry', () {
+      final p = LogPrinterPresets.ci(methodCount: 1, errorMethodCount: 3);
+      final out = _format(p, _record(stackTrace: _chain(_frames)));
+      expect(_frameLines(out), hasLength(1));
+    });
+
+    test('excludePaths drops matching frames', () {
+      final p = LogPrinterPresets.ci(excludePaths: const ['package:noisy']);
+      final out = _format(p, _record(stackTrace: _chain(_frames)));
+      expect(out, isNot(contains('package:noisy/')));
+      expect(out, contains('package:app/a.dart'));
+    });
+
+    test('showAsyncGaps defaults to off — traces are spliced together', () {
+      final p = LogPrinterPresets.ci();
+      final out = _format(p, _record(stackTrace: _twoTraceChain()));
+      expect(out, isNot(contains('asynchronous gap')));
+    });
+
+    test('showAsyncGaps: true separates the traces of a chain', () {
+      final p = LogPrinterPresets.ci(showAsyncGaps: true);
+      final out = _format(p, _record(stackTrace: _twoTraceChain()));
+      expect(out, contains('asynchronous gap'));
+    });
+
+    test('suppressTypeNames: true drops the class name from the prefix', () {
+      final msg = LogMessage('hello', String, method: 'go');
+      final withNames = _format(
+        LogPrinterPresets.ci(suppressTypeNames: false),
+        _record(object: msg),
+      );
+      final without = _format(
+        LogPrinterPresets.ci(suppressTypeNames: true),
+        _record(object: msg),
+      );
+
+      expect(withNames, contains('[String.go]'));
+      expect(without, contains('[go]'));
+      expect(without, isNot(contains('String')));
+    });
+
+    test('terminal() forwards tuning to the underlying human() preset', () {
+      final p = LogPrinterPresets.terminal(
+        methodCount: 2,
+        excludePaths: const ['package:noisy'],
+      );
+      final out = _format(p, _record(stackTrace: _chain(_frames)));
+      expect(out, isNot(contains('package:noisy/')));
+      expect(_frameLines(out), hasLength(2));
+    });
+
+    test('human() forwards tuning', () {
+      final p = LogPrinterPresets.human(
+        const TerminalCapabilities(ansi: false, tty: false),
+        methodCount: 1,
+      );
+      final out = _format(p, _record(stackTrace: _chain(_frames)));
+      expect(_frameLines(out), hasLength(1));
     });
   });
 }

@@ -50,9 +50,24 @@ ComposablePrinter(
   ],
   methodCount: 10,          // Stack trace frames to show
   errorMethodCount: 20,     // More frames for error-level logs (null = use methodCount)
-  excludePaths: ['package:noisy_dep/'],  // Hide frames from these libraries
+  excludePaths: ['package:noisy_dep'],  // Hide frames from these libraries
   showAsyncGaps: true,      // Show "asynchronous gap" separators in stack traces
   output: print,            // Where formatted lines go
+);
+```
+
+An `excludePaths` entry matches a frame's library exactly, or any library
+underneath it — `'package:noisy_dep'` drops `package:noisy_dep/src/a.dart`,
+while a trailing slash (`'package:noisy_dep/'`) matches nothing.
+
+Every one of those knobs is also available on the `LogPrinterPresets`
+factories, so tuning stack depth doesn't mean giving up a preset:
+
+```dart
+LogPrinterPresets.terminal(
+  methodCount: 3,           // terse in normal logs...
+  errorMethodCount: 20,     // ...deep when something actually broke
+  excludePaths: ['package:noisy_dep'],
 );
 ```
 
