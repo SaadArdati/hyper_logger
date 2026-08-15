@@ -1,7 +1,8 @@
-# pub.dev rewrites relative README image paths to the `repository` URL and
-# serves them from GitHub, so shipping the PNGs would add ~1.1 MB to every
-# `pub get` for images no renderer ever reads from the archive.
-assets/
+# Do NOT ignore assets/. pub.dev resolves relative README image paths against
+# the published archive, and only then rewrites the src to the `repository`
+# URL to serve the bytes. Excluding the PNGs makes pub.dev drop the images
+# from the rendered README entirely (this happened in 0.2.2). Keep them here
+# and keep them small via `node tool/render_preview.js --optimize-only`.
 
 benchmark/
 tool/

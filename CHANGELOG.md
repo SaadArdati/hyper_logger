@@ -1,3 +1,8 @@
+## 0.2.2+1
+
+- Restore the README preview images on pub.dev. 0.2.2 excluded `assets/` from
+  the published archive.
+
 ## 0.2.2
 
 - Compress assets & add .pubignore.

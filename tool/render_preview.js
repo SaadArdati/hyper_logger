@@ -9,7 +9,19 @@ const ROOT = path.join(__dirname, '..');
 // palette costs ~1 RMSE (invisible on antialiased glyph edges) and cuts the
 // total asset weight by about 69%. pngquant aborts on its own if it cannot hit
 // the quality floor, in which case we keep the untouched original.
-const PNGQUANT_QUALITY = '70-95';
+const PNGQUANT_QUALITY = '45-85';
+
+// Hard palette cap. Terminal output is flat color, so 64 entries covers the
+// text, box borders, and level tints with room to spare; the emoji are the
+// only elements that use more, and they degrade gracefully.
+const PNGQUANT_COLORS = 64;
+
+// Rendered pixel density. The layout below is 920 CSS px and the README column
+// renders at roughly that width, so 1x is a 1:1 match with no oversampling.
+// Render at the target density rather than downscaling afterwards: resampling
+// blends flat terminal colors into gradients that quantize and compress far
+// worse than a native render's long flat runs.
+const DEVICE_SCALE = 1;
 
 function hasCommand(cmd) {
   try {
@@ -34,8 +46,8 @@ function optimize(pngPath) {
     const tmp = `${pngPath}.tmp`;
     try {
       execSync(
-        `pngquant --quality=${PNGQUANT_QUALITY} --speed 1 --force ` +
-          `--output "${tmp}" "${pngPath}"`,
+        `pngquant --quality=${PNGQUANT_QUALITY} --colors ${PNGQUANT_COLORS} ` +
+          `--speed 1 --force --output "${tmp}" "${pngPath}"`,
         { stdio: 'ignore' },
       );
       fs.renameSync(tmp, pngPath);
@@ -132,12 +144,12 @@ async function renderPreset(puppeteer, [name, dartArg, usesAnsi]) {
 
   const browser = await puppeteer.launch({ headless: true });
   const page = await browser.newPage();
-  await page.setViewport({ width: 1200, height: 800, deviceScaleFactor: 2 });
+  await page.setViewport({ width: 1200, height: 800, deviceScaleFactor: DEVICE_SCALE });
   await page.goto('file://' + path.resolve(styledHtml));
 
   // Uniform width, tight height from content
   const UNIFORM_WIDTH = 920;
-  await page.setViewport({ width: UNIFORM_WIDTH, height: 2000, deviceScaleFactor: 2 });
+  await page.setViewport({ width: UNIFORM_WIDTH, height: 2000, deviceScaleFactor: DEVICE_SCALE });
   // Measure actual content bounds
   const contentBox = await page.evaluate(() => {
     const body = document.body;
@@ -151,7 +163,7 @@ async function renderPreset(puppeteer, [name, dartArg, usesAnsi]) {
   await page.setViewport({
     width: UNIFORM_WIDTH,
     height: finalHeight,
-    deviceScaleFactor: 2,
+    deviceScaleFactor: DEVICE_SCALE,
   });
 
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
