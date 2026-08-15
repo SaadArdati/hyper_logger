@@ -1,6 +1,5 @@
-## 0.2.1
+## 0.2.2
 
-- Shorten the package description to satisfy pub.dev's character guideline.
 - Compress assets & add .pubignore.
 - `LogPrinterPresets.automatic`, `.human`, `.terminal`, and `.ci` now
   forward the full `ComposablePrinter` tuning surface — `methodCount`,
@@ -12,6 +11,10 @@
   `stackTrace.toString()` and have nothing to tune.
 - `ComposablePrinter.defaultMethodCount` — the default frame count (10),
   exposed so wrappers can mirror it instead of copying the literal.
+
+## 0.2.1
+
+- Shorten the package description to satisfy pub.dev's character guideline.
 
 ## 0.2.0
 
