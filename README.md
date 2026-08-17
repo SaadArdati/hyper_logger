@@ -2,7 +2,7 @@
 
 Composable, beautiful logging for Dart. Zero config. Every environment.
 
-![hyper_logger output across environments](assets/preview_hero.png)
+![hyper_logger output across environments](https://raw.githubusercontent.com/SaadArdati/hyper_logger/main/assets/preview_hero.png)
 
 ## Start logging in one line
 
@@ -33,19 +33,19 @@ always optional: omit it when you don't need it, add it when you do.
 and selects the best format:
 
 **Terminal** (emoji + box + ANSI colors)
-![Terminal](assets/preview_terminal.png)
+![Terminal](https://raw.githubusercontent.com/SaadArdati/hyper_logger/main/assets/preview_terminal.png)
 
 **IDE Run Console** (emoji + ANSI color + prefix, no box)
-![IDE](assets/preview_ide.png)
+![IDE](https://raw.githubusercontent.com/SaadArdati/hyper_logger/main/assets/preview_ide.png)
 
 **CI** (timestamp + prefix, machine-parseable)
-![CI](assets/preview_ci.png)
+![CI](https://raw.githubusercontent.com/SaadArdati/hyper_logger/main/assets/preview_ci.png)
 
 **Cloud Run / JSON** (structured, Cloud Logging compatible)
-![JSON](assets/preview_json.png)
+![JSON](https://raw.githubusercontent.com/SaadArdati/hyper_logger/main/assets/preview_json.png)
 
 **Web** (DevTools groups with `%c` CSS styling, `console.dir` for data)
-![Web Console](assets/preview_web_console.png)
+![Web Console](https://raw.githubusercontent.com/SaadArdati/hyper_logger/main/assets/preview_web_console.png)
 
 Works on native, web, Flutter, and pure Dart.
 
@@ -62,7 +62,7 @@ ComposablePrinter([
 ]);
 ```
 
-![Custom colors](assets/preview_custom_colors.png)
+![Custom colors](https://raw.githubusercontent.com/SaadArdati/hyper_logger/main/assets/preview_custom_colors.png)
 
 ## Add logging to any class
 
@@ -105,11 +105,11 @@ HyperLogger.info<Portfolio>('Positions loaded', data: {
 });
 ```
 
-![Data and errors](assets/preview_data.png)
+![Data and errors](https://raw.githubusercontent.com/SaadArdati/hyper_logger/main/assets/preview_data.png)
 
 Full error with data + exception + stack trace:
 
-![Full error](assets/preview_full.png)
+![Full error](https://raw.githubusercontent.com/SaadArdati/hyper_logger/main/assets/preview_full.png)
 
 ## Scoped loggers
 

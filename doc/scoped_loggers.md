@@ -59,7 +59,7 @@ final log2 = HyperLogger.withOptions<Api>(tag: 'sendgrid');
 log2.info('Email queued');
 ```
 
-![Tagged scoped logger output](../assets/preview_doc_scoped.png)
+![Tagged scoped logger output](https://raw.githubusercontent.com/SaadArdati/hyper_logger/main/assets/preview_doc_scoped.png)
 
 Tags are preserved across all modes. In `LogMode.silent`, your crash
 reporting service still receives the tagged message:
@@ -71,7 +71,7 @@ log.warning('rate limited');
 // Crash reporting receives: "[stripe] rate limited"
 ```
 
-![Silent-mode output: console empty, crash reporting receives the tagged message](../assets/preview_doc_scoped_silent.png)
+![Silent-mode output: console empty, crash reporting receives the tagged message](https://raw.githubusercontent.com/SaadArdati/hyper_logger/main/assets/preview_doc_scoped_silent.png)
 
 One thing to watch out for: passing an empty string (`tag: ''`) is not
 the same as `null`. It will prepend `[]` to every message, which is

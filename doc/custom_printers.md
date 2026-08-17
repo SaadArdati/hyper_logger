@@ -38,7 +38,7 @@ takes a list of decorators that configure the output style, then runs
 each log entry through a three-stage pipeline: content extraction, style
 resolution, and rendering.
 
-![Terminal output](../assets/preview_terminal.png)
+![Terminal output](https://raw.githubusercontent.com/SaadArdati/hyper_logger/main/assets/preview_terminal.png)
 
 ```dart
 ComposablePrinter(
@@ -287,7 +287,7 @@ headers (colored badges per level). Inside the group:
 You don't need to configure this manually. It's selected automatically
 when running on web.
 
-![Web console output](../assets/preview_web_console.png)
+![Web console output](https://raw.githubusercontent.com/SaadArdati/hyper_logger/main/assets/preview_web_console.png)
 
 ## Decorator composition
 
@@ -307,7 +307,7 @@ final printer = ComposablePrinter([
 Each decorator owns a non-overlapping set of fields, so order is
 irrelevant. Shuffle them, reorder them, the output stays the same.
 
-![Custom colors](../assets/preview_custom_colors.png)
+![Custom colors](https://raw.githubusercontent.com/SaadArdati/hyper_logger/main/assets/preview_custom_colors.png)
 
 | Decorator | Fields | Effect |
 |---|---|---|
@@ -401,7 +401,7 @@ Entries up to `maxPerSecond` are forwarded immediately. Excess entries
 are queued and drained gradually. When the queue exceeds `maxQueueSize`,
 the oldest entries are dropped and a summary is emitted:
 
-![Throttled output](../assets/preview_throttled.png)
+![Throttled output](https://raw.githubusercontent.com/SaadArdati/hyper_logger/main/assets/preview_throttled.png)
 
 Call `flush()` on app shutdown to drain remaining entries:
 

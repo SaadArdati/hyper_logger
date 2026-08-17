@@ -1,3 +1,10 @@
+## 0.2.2+2
+
+- Shrink the published archive from 1.1 MB to 168 KB. The README and docs now
+  reference the preview images by absolute GitHub URL, so pub.dev proxies them
+  from the repository and the PNGs no longer ship to every `pub get`. The
+  images themselves are back to full 2x resolution.
+
 ## 0.2.2+1
 
 - Restore the README preview images on pub.dev. 0.2.2 excluded `assets/` from

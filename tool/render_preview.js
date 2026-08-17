@@ -9,19 +9,15 @@ const ROOT = path.join(__dirname, '..');
 // palette costs ~1 RMSE (invisible on antialiased glyph edges) and cuts the
 // total asset weight by about 69%. pngquant aborts on its own if it cannot hit
 // the quality floor, in which case we keep the untouched original.
-const PNGQUANT_QUALITY = '45-85';
+const PNGQUANT_QUALITY = '70-95';
 
-// Hard palette cap. Terminal output is flat color, so 64 entries covers the
-// text, box borders, and level tints with room to spare; the emoji are the
-// only elements that use more, and they degrade gracefully.
-const PNGQUANT_COLORS = 64;
-
-// Rendered pixel density. The layout below is 920 CSS px and the README column
-// renders at roughly that width, so 1x is a 1:1 match with no oversampling.
-// Render at the target density rather than downscaling afterwards: resampling
-// blends flat terminal colors into gradients that quantize and compress far
-// worse than a native render's long flat runs.
-const DEVICE_SCALE = 1;
+// Rendered pixel density. 2x keeps the previews crisp on retina displays.
+// The images are served from GitHub rather than the published archive (see
+// .pubignore), so their weight costs page load rather than `pub get`, and
+// legibility wins over bytes. Render at the target density rather than
+// downscaling afterwards: resampling blends flat terminal colors into
+// gradients that quantize and compress far worse than a native render.
+const DEVICE_SCALE = 2;
 
 function hasCommand(cmd) {
   try {
@@ -46,8 +42,8 @@ function optimize(pngPath) {
     const tmp = `${pngPath}.tmp`;
     try {
       execSync(
-        `pngquant --quality=${PNGQUANT_QUALITY} --colors ${PNGQUANT_COLORS} ` +
-          `--speed 1 --force --output "${tmp}" "${pngPath}"`,
+        `pngquant --quality=${PNGQUANT_QUALITY} --speed 1 --force ` +
+          `--output "${tmp}" "${pngPath}"`,
         { stdio: 'ignore' },
       );
       fs.renameSync(tmp, pngPath);

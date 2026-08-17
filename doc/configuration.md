@@ -266,7 +266,7 @@ HyperLogger.info<CoffeeTracker>('Daily intake logged', data: {
 
 The data is rendered as indented JSON inside the log box:
 
-![Structured data output](../assets/preview_doc_data.png)
+![Structured data output](https://raw.githubusercontent.com/SaadArdati/hyper_logger/main/assets/preview_doc_data.png)
 
 Any value that isn't JSON-encodable falls back to `.toString()`. If
 encoding fails entirely, the whole payload is printed as a raw string.

@@ -17,7 +17,7 @@ class AuthService with HyperLoggerMixin<AuthService> {
 }
 ```
 
-![Mixin output](../assets/preview_doc_mixin.png)
+![Mixin output](https://raw.githubusercontent.com/SaadArdati/hyper_logger/main/assets/preview_doc_mixin.png)
 
 Without any configuration, the mixin delegates to `HyperLogger` static
 methods, forwarding `<T>` for you. All global settings (mode, filters,
