@@ -5,21 +5,26 @@ import 'log_message.dart';
 
 /// A structured log record that flows through the printer pipeline.
 ///
-/// This is hyper_logger's own record type, decoupling the public API from
-/// the `logging` package's [logging.LogRecord]. Created internally from
-/// [logging.LogRecord] in [HyperLogger._handleLogRecord].
+/// Native calls construct this hyper_logger-owned type directly. The explicit
+/// [LogEntry.fromLogRecord] adapter exposes [logging.LogRecord] for inbound
+/// `package:logging` integrations; the printer pipeline uses [LogEntry] after
+/// that conversion.
 class LogEntry {
   /// The severity level of this record.
   final LogLevel level;
 
-  /// The formatted log message string.
+  /// The canonical human-readable message used by every built-in printer.
+  ///
+  /// [LogMessage.message] mirrors this value for compatibility and structured
+  /// payload access, but interceptors and sanitizers should transform this
+  /// field. HyperLogger synchronizes the mirror after every pipeline stage.
   final String message;
 
   /// The structured payload object. When the log call originated from
   /// HyperLogger, this is a [LogMessage] instance.
   final Object? object;
 
-  /// The name of the logger that produced this record (typically the
+  /// The canonical logger name used by every built-in printer (typically the
   /// stringified type parameter from the log call).
   final String loggerName;
 
@@ -51,6 +56,30 @@ class LogEntry {
     this.stackTrace,
     this.tag,
   });
+
+  /// Returns a transformed entry while preserving every omitted field.
+  ///
+  /// Nullable fields use callbacks so `() => null` can explicitly clear a
+  /// value while an omitted callback retains the existing value.
+  LogEntry copyWith({
+    LogLevel? level,
+    String? message,
+    Object? Function()? object,
+    String? loggerName,
+    DateTime? time,
+    Object? Function()? error,
+    StackTrace? Function()? stackTrace,
+    String? Function()? tag,
+  }) => LogEntry(
+    level: level ?? this.level,
+    message: message ?? this.message,
+    object: object == null ? this.object : object(),
+    loggerName: loggerName ?? this.loggerName,
+    time: time ?? this.time,
+    error: error == null ? this.error : error(),
+    stackTrace: stackTrace == null ? this.stackTrace : stackTrace(),
+    tag: tag == null ? this.tag : tag(),
+  );
 
   /// Creates a [LogEntry] from a [logging.LogRecord].
   ///

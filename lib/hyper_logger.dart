@@ -6,6 +6,9 @@
 export 'src/hyper_logger_base.dart';
 export 'src/hyper_logger_mixin.dart';
 
+// Interceptors and sanitization policies
+export 'src/interceptors/redacting_interceptor.dart';
+
 // Platform / runtime detection
 export 'src/platform/environment_detector.dart'
     show

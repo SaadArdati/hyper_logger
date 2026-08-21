@@ -17,9 +17,9 @@ import 'shared/scenarios.dart';
 
 /// Deep-dive benchmarks targeting the three hotspots found in the main suite:
 ///
-/// 1. Stack trace parsing (~400us) — where does the time go?
-/// 2. Bare ComposablePrinter overhead (402ns) — extraction pipeline cost
-/// 3. Silent mode vs disabled wrapper (803ns vs 5ns) — the 160x gap
+/// 1. Stack-trace capture and parsing — where does the time go?
+/// 2. Bare [ComposablePrinter] extraction and rendering overhead.
+/// 3. Disabled and silent-mode fast paths.
 ///
 /// Run: dart run benchmark/deep_dive_benchmark.dart
 void main() {
@@ -46,6 +46,13 @@ void main() {
 
   // Capture a real stack trace once, reuse for consistent measurement.
   final realStack = StackTrace.current;
+
+  _bench('StackTrace.current capture only', () {
+    return () {
+      final trace = StackTrace.current;
+      noop.callCount += trace.hashCode & 1;
+    };
+  });
 
   _bench('Chain.forTrace(StackTrace.current)', () {
     return () {
@@ -90,6 +97,14 @@ void main() {
     );
     return () {
       final lines = parser.parse(realStack, isError: true);
+      noop.callCount += lines.length;
+    };
+  });
+
+  _bench('ComposablePrinter error (methodCount=0)', () {
+    final printer = ComposablePrinter(const [], methodCount: 0);
+    return () {
+      final lines = printer.format(BenchmarkScenarios.withError);
       noop.callCount += lines.length;
     };
   });
@@ -209,8 +224,8 @@ void main() {
     };
   });
 
-  // CallerExtractor is called on every LogMessage because method was
-  // provided in our scenario. Let's test with and without.
+  // The baseline scenario provides a method and skips caller extraction.
+  // Compare records with and without that explicit metadata.
   _bench('format() simple record WITHOUT LogMessage.method', () {
     final p = ComposablePrinter(const [], output: noop.call);
     // Build an entry whose LogMessage has no method set, forcing
@@ -287,10 +302,9 @@ void main() {
     return () => HyperLogger.info<String>('suppressed');
   });
 
-  _bench('_ensureInitialized + _getLogger (core overhead)', () {
-    // This measures the static dispatch path that silent mode still executes:
-    // _ensureInitialized → _log → LogMessage() → _getLogger → logger.log
-    // Even though the listener drops it, the LogRecord is allocated.
+  _bench('Initialized silent-mode dispatch', () {
+    // Repeated calls measure the initialized silent-mode short circuit. Native
+    // records and LogMessage values are not allocated on this path.
     HyperLogger.init(
       printer: DirectPrinter(output: noop.call),
       mode: LogMode.silent,

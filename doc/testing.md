@@ -14,10 +14,15 @@ void main() {
 }
 ```
 
-`reset()` clears everything: the printer, mode, interceptor chain,
+`reset()` clears everything: the printer, mode, interceptor and sanitizer chains,
 crash reporting delegate, stream subscription, and both internal caches
 (per-type loggers and scoped logger instances). After `reset()`, the
 next log call will re-initialize with platform defaults.
+
+Production teardown has a different contract. `await HyperLogger.shutdown()`
+also clears active state, but leaves logging disabled until an explicit
+`HyperLogger.init()`. Use `reset()` for independent tests and `shutdown()` for
+process lifecycle.
 
 ## Suppressing output in tests
 
@@ -90,6 +95,9 @@ class RecordingPrinter implements LogPrinter {
 
   @override
   void log(LogEntry entry) => entries.add(entry);
+
+  @override
+  void dispose() {}
 }
 
 test('logs at the correct level', () {
@@ -195,6 +203,50 @@ Interceptors run in declaration order; the first to return `null`
 short-circuits the chain. A throwing interceptor is skipped (its slot
 in the chain is treated as a pass-through), so one buggy hook can't
 black-hole the pipeline.
+
+## Testing sanitizers
+
+Sanitizers are the final, fail-closed chain. Test both transformation and drop
+behavior against every configured sink. Prefer semantic assertions—decoded
+keys, paths, and complete protocol values—over tests that merely search for a
+credential-looking substring:
+
+```dart
+test('sanitizer protects output', () {
+  final printer = RecordingPrinter();
+  final redactor = RedactingInterceptor(secrets: ['runtime-secret']);
+  HyperLogger.init(printer: printer, sanitizers: [redactor.call]);
+
+  HyperLogger.info<String>('token=runtime-secret');
+
+  expect(printer.entries.single.message, isNot(contains('runtime-secret')));
+});
+```
+
+A sanitizer returning `null` or throwing must produce no printer or
+crash-reporting call. When configuring several sanitizers, also assert their
+declaration order and keep the broad redactor last.
+
+At minimum, cover:
+
+- every application-specific key and `RedactionPath`;
+- exact near-misses that must remain visible;
+- configured literal values in messages, data, errors, and stack traces;
+- printer and crash-reporting output from the same sanitized entry;
+- `null`, exception, cycle, unknown-object, and resource-limit drops;
+- custom replacements that could compose with surrounding text into JSON,
+  HTTP, URI/form, or a sensitive final key;
+- selected environment JSON, including duplicate decoded names.
+
+JSON duplicate-name cases matter because receivers disagree about first-value,
+last-value, error, or multi-value behavior ([RFC 8259 §4](https://www.rfc-editor.org/rfc/rfc8259.html#section-4)).
+Protocol fixtures should follow the exact cases documented by
+[RFC 9110](https://www.rfc-editor.org/rfc/rfc9110.html),
+[RFC 9112](https://www.rfc-editor.org/rfc/rfc9112.html),
+[RFC 6750](https://www.rfc-editor.org/rfc/rfc6750.html), and
+[RFC 7468](https://www.rfc-editor.org/rfc/rfc7468.html), including case and
+line-ending rules. See [Redaction and sanitizers](redaction.md) for the complete
+coverage contract and source list.
 
 ## Mocking scoped loggers
 

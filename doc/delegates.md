@@ -76,13 +76,9 @@ Detach for test teardown or when switching services:
 HyperLogger.detachServices();
 ```
 
-Check what's currently attached:
-
-```dart
-if (HyperLogger.crashReporting != null) {
-  // A delegate is active
-}
-```
+Attachment is intentionally write-oriented. If the application needs to know
+whether a delegate is active, own that state alongside its service composition
+and call `detachServices()` when removing the delegate.
 
 `reset()` also clears the delegate, along with everything else.
 
@@ -163,10 +159,17 @@ Logging never crashes your app. Not even if your crash reporter crashes.
 
 ## Delegate call timing
 
-Delegate calls happen before printer output in the same method, and
-they are fire-and-forget. The returned Future is not awaited, just
-error-handled. This means delegate calls never block the logging call
-and never slow down your app.
+Delegate calls happen after interceptors and the complete sanitizer chain, but
+before printer output. They are fire-and-forget: the returned Future is not
+awaited, only error-handled. This means delegate calls do not block the logging
+call. In silent mode, eligible entries still pass through sanitization and reach
+the delegate while printer output remains suppressed.
+
+The delegate never receives the pre-sanitizer entry. Configure privacy policy
+through `sanitizers: [...]`, not inside a delegate implementation, so printers
+and reporting services share one boundary. See
+[Redaction and sanitizers](redaction.md) for exact coverage, standards, and
+failure behavior.
 
 See [example/crash_reporting_example.dart](../example/crash_reporting_example.dart)
 for a complete runnable example.

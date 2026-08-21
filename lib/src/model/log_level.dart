@@ -2,8 +2,10 @@ import 'package:logging/logging.dart' as logging;
 
 /// Log severity levels for [HyperLogger].
 ///
-/// Provides a clean public API without exposing the `logging` package's
-/// [logging.Level] type. Each value maps 1:1 to a [logging.Level] constant.
+/// Native HyperLogger calls use this enum. The explicit adapter methods
+/// [toLoggingLevel] and [fromLoggingLevel] expose [logging.Level] for code that
+/// integrates with `package:logging`; each value maps 1:1 to its corresponding
+/// logging level.
 enum LogLevel implements Comparable<LogLevel> {
   /// Very fine-grained diagnostics. Maps to [logging.Level.FINEST].
   trace,

@@ -572,12 +572,9 @@ void main() {
       // duration of the handler's Future (set on entry, cleared via
       // `whenComplete`). Failures occurring during the awaited tail —
       // self-induced or genuinely independent — are coalesced. This is
-      // intentional: a Zone-scoped marker can't bound the common
-      // same-printer-reentry case (`package:logging`'s record stream
-      // delivers events in the listener's registration zone, not the
-      // emitter's), so a flat boolean held across the handler's Future
-      // is the only durable mechanism. See `FileWriterErrorHandler`'s
-      // doc for the full rationale.
+      // intentional: a flat boolean covers direct HyperLogger reentry and
+      // inbound third-party logging records that can cross listener zones.
+      // See `FileWriterErrorHandler`'s doc for the full rationale.
       //
       // Round-6 briefly cleared the guard after the handler's sync
       // prefix to give per-record visibility. Round-7 reverted that
@@ -816,10 +813,7 @@ void main() {
       // Round-7 fix: the guard is held across the handler's Future
       // via `whenComplete`, so handler-originated reentries (sync
       // recursion AND post-await continuations) are coalesced into
-      // the first-error window. (An earlier zone-scoped attempt was
-      // abandoned because `package:logging`'s record stream
-      // delivers events in the listener's registration zone, not
-      // the emitter's, defeating zone propagation.)
+      // the first-error window.
       final subdir = Directory('${tempDir.path}/sub')..createSync();
       final path = '${subdir.path}/app.log';
       var onErrorCalls = 0;
@@ -886,7 +880,7 @@ void main() {
         // and the global root printer IS this RotatingFilePrinter. Under
         // sustained handle loss, a missing reentrancy guard would chain:
         //   log()→writeFromSync fails→onError→HyperLogger.warning→
-        //   _handleLogRecord→printer.log()→writeFromSync fails→onError→…
+        //   _handleEntry→printer.log()→writeFromSync fails→onError→…
         // until the stack blows. The _safeOnError reentrancy guard
         // breaks this chain.
         final path = '${tempDir.path}/app.log';

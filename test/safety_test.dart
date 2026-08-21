@@ -95,11 +95,11 @@ void main() {
   // ── Printer that throws ─────────────────────────────────────────────────
 
   group('printer that throws', () {
-    test('does not crash — error is swallowed by _handleLogRecord', () {
+    test('does not crash — error is swallowed by the shared pipeline', () {
       final throwingPrinter = _ThrowingPrinter();
       HyperLogger.init(printer: throwingPrinter);
 
-      // This should NOT throw, the try-catch in _handleLogRecord swallows it.
+      // This should NOT throw; the pipeline boundary swallows it.
       expect(() => HyperLogger.info<String>('boom'), returnsNormally);
       expect(throwingPrinter.callCount, equals(1));
     });
@@ -119,15 +119,9 @@ void main() {
       final throwingPrinter = _ThrowingPrinter();
       HyperLogger.init(printer: throwingPrinter);
 
-      // Actually, printer throws in _handleLogRecord which is AFTER the
-      // delegate calls in warning/error/fatal. But the delegate calls
-      // happen in the log methods, before _log publishes to the logging
-      // package. So delegates should have been called already.
-      // However, in enabled mode, the flow is:
-      // 1. warning() calls fireDelegateSafely(crashReporting.log)
-      // 2. warning() calls _log() which publishes a LogRecord
-      // 3. _handleLogRecord receives it and calls printer.log() which throws
-      // So delegate fires BEFORE the printer.
+      // The shared pipeline dispatches crash reporting after interceptors and
+      // sanitizers, then calls the printer. A printer failure therefore cannot
+      // prevent the already-dispatched delegate call.
 
       final crash = _FakeCrashReporting();
       HyperLogger.attachServices(crashReporting: crash);

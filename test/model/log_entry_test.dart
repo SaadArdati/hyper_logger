@@ -89,6 +89,62 @@ void main() {
     });
   });
 
+  group('LogEntry.copyWith', () {
+    test('preserves omitted fields and replaces supplied fields', () {
+      final object = Object();
+      final error = Object();
+      final stackTrace = StackTrace.current;
+      final time = DateTime.utc(2026);
+      final original = LogEntry(
+        level: LogLevel.info,
+        message: 'before',
+        object: object,
+        loggerName: 'Logger',
+        time: time,
+        error: error,
+        stackTrace: stackTrace,
+        tag: 'tag',
+      );
+
+      final copy = original.copyWith(level: LogLevel.warning, message: 'after');
+
+      expect(copy.level, LogLevel.warning);
+      expect(copy.message, 'after');
+      expect(copy.object, same(object));
+      expect(copy.loggerName, 'Logger');
+      expect(copy.time, time);
+      expect(copy.error, same(error));
+      expect(copy.stackTrace, same(stackTrace));
+      expect(copy.tag, 'tag');
+    });
+
+    test('nullable fields can be explicitly replaced or cleared', () {
+      final replacement = Object();
+      final original = LogEntry(
+        level: LogLevel.error,
+        message: 'message',
+        object: Object(),
+        loggerName: 'Logger',
+        time: DateTime.utc(2026),
+        error: Object(),
+        stackTrace: StackTrace.current,
+        tag: 'tag',
+      );
+
+      final copy = original.copyWith(
+        object: () => replacement,
+        error: () => null,
+        stackTrace: () => null,
+        tag: () => null,
+      );
+
+      expect(copy.object, same(replacement));
+      expect(copy.error, isNull);
+      expect(copy.stackTrace, isNull);
+      expect(copy.tag, isNull);
+    });
+  });
+
   // ── fromLogRecord conversion ──────────────────────────────────────────────
 
   group('LogEntry.fromLogRecord', () {

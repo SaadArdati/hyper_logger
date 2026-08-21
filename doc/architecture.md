@@ -9,50 +9,91 @@ to use the library.
 Every log call flows through the same pipeline:
 
 ```
-HyperLogger.info<MyClass>('msg', data: {...})
-  |
-  v
-LogMessage (message + type + data + callerStackTrace)
-  |
-  v
-logging.LogRecord (via package:logging internally)
-  |
-  v
-_handleLogRecord
-  |
-  v
-LogEntry.fromLogRecord (conversion boundary; logging package hidden from here on)
+HyperLogger call                         third-party logging.LogRecord
+  |                                       |
+  v                                       v
+Eligible native sink?                 Eligible printer sink?
+  |                                       |
+  v                                       v
+LogMessage + LogEntry                  LogEntry.fromLogRecord
+  |                                       |
+  +-------------------+-------------------+
+                      |
+                      v
+                 _handleEntry
   |
   v
 Interceptors (run in order; first one to return null drops the entry)
   |
   v
-LogPrinter.log(LogEntry)
+Sanitizers (run in order; null or throw drops the entry from every sink)
   |
-  v
-ComposablePrinter pipeline:
-  ContentExtractor.extract()  -> ExtractionResult (sections, className, methodName)
-  StyleResolver.resolve()     -> ResolvedSectionStyle / ResolvedBorderStyle
-  LogRenderer.render()        -> List<String> output lines
-  output(line)                -> print() or custom sink
+  +--> CrashReportingDelegate for native warning/error/fatal only
+  |      (fire-and-forget)
+  |
+  +--> LogPrinter.log(LogEntry), unless output is silent
+         |
+         v
+       ComposablePrinter pipeline:
+         ContentExtractor.extract()  -> ExtractionResult
+         StyleResolver.resolve()     -> resolved styles
+         LogRenderer.render()        -> output lines
+         output(line)                -> print() or custom sink
 ```
 
-Delegate calls (crash reporting) happen separately, before the entry
-enters this pipeline. They fire directly in the `warning()`, `error()`,
-and `fatal()` methods, before `_log()` is called.
+Private dispatch arguments carry routing intent until after the shared
+interceptor and sanitizer pipeline. For native warning/error/fatal calls,
+crash reporting and printers therefore receive the same sanitized `LogEntry`.
+`LogMessage.reportToCrashReporting` mirrors that native decision as metadata
+for custom printers, but changing the field does not control delegate routing.
+Third-party `logging.LogRecord` values are deliberately printer-only and never
+reach the crash delegate; silent mode discards them before conversion. Native
+delegate-eligible records still complete sanitization in silent mode when a
+delegate is attached. With no eligible sink, conversion and the entire pipeline
+are skipped.
 
 ## Key design decisions
 
-### The `logging` package is an internal detail
+### The `logging` package is an explicit integration dependency
 
-The public API uses `LogEntry`, `LogLevel`, and `LogMode` exclusively.
-`package:logging` is used internally for its hierarchical logger tree and
-root record stream, but consumers never import it. The conversion from
-`logging.LogRecord` to `LogEntry` happens once in `_handleLogRecord`.
+HyperLogger-native calls use `LogEntry`, `LogLevel`, and `LogMode`, while
+`package:logging` supplies the level hierarchy and inbound bridge for
+third-party records. Most consumers do not need to import it. Adapter APIs do
+intentionally expose `logging.Level` through `LogLevel` conversions and
+`logging.LogRecord` through `LogEntry.fromLogRecord`, however, so integration
+code may import it directly.
 
-This means you can use hyper_logger without knowing that `package:logging`
-exists underneath. It also means the logging package could be swapped out
-without changing the public API.
+Native calls construct `LogEntry` directly and cannot expose raw payloads to
+other root-stream subscribers. A third-party `logging.LogRecord` is converted
+once in `_handleLogRecord` before joining `_handleEntry`. The pipeline after
+that conversion is package-agnostic; replacing `package:logging` itself would
+still require a migration of the public adapter APIs.
+
+### Sanitization is a one-way boundary
+
+Ordinary interceptors are intentionally failure-isolated: a throwing
+interceptor is skipped. Sanitizers have the opposite failure contract. A
+`null` result, exception, traversal limit, cycle, or unsafe redaction
+composition drops the entry before both output arms. The previous entry is
+never restored after sanitization begins.
+
+The built-in redactor is split into a small public facade and private policy,
+structured-walker, protocol-parser, text-coordinator, and literal-matcher
+modules. Supported representations are decoded with exact rules rather than
+credential-shaped regexes. Original and final structured paths are both
+checked, and changed text is re-inspected until it reaches the bounded safe
+fixed point. This prevents replacement text from creating a sensitive JSON,
+HTTP, URI/form, or structured representation after the corresponding check.
+
+The standards basis is documented in [Redaction and sanitizers](redaction.md):
+[OWASP logging guidance](https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html),
+[RFC 9110](https://www.rfc-editor.org/rfc/rfc9110.html),
+[RFC 9112](https://www.rfc-editor.org/rfc/rfc9112.html),
+[RFC 3986](https://www.rfc-editor.org/rfc/rfc3986.html),
+[RFC 6750](https://www.rfc-editor.org/rfc/rfc6750.html),
+[RFC 8259](https://www.rfc-editor.org/rfc/rfc8259.html),
+[RFC 7468](https://www.rfc-editor.org/rfc/rfc7468.html), and the
+[OpenTelemetry URL conventions](https://opentelemetry.io/docs/specs/semconv/url/).
 
 ### CSS-cascade style resolution
 
@@ -91,7 +132,8 @@ Delegate calls (`CrashReportingDelegate`) are wrapped in
 `fireDelegateSafely` (in `delegates/delegate_safety.dart`), which
 catches both synchronous throws and async Future rejections. The
 returned Future is not awaited, just error-handled. Logging never
-crashes the app, even if your Crashlytics SDK throws.
+crashes the app, even if your Crashlytics SDK throws. Dispatch occurs after
+sanitization and before printer output.
 
 ### Release-mode type name suppression
 
@@ -107,30 +149,35 @@ extraction still works since it operates on frame member names, not
 Printer selection is handled through conditional exports:
 
 - **Native** (`printer_factory_native.dart`): Returns
-  `LogPrinterPresets.automatic()`, which detects GCP / AWS / CI by
-  environment markers, then falls through to a `human(capabilities)`
-  preset composed from the live stdout's ANSI / TTY / width.
+  `LogPrinterPresets.automatic()`, which detects GCP / AWS / Azure / CI by
+  environment markers, then falls through to a `human(capabilities)` preset
+  composed from the live stdout's ANSI / TTY / width. Azure markers cover App
+  Service, Functions, and Container Apps.
 - **Web** (`printer_factory_web.dart`): Returns `WebConsolePrinter()`.
 
 Detection runs once at init time, not per log call.
 
 ## Performance
 
-Numbers below are from `benchmark/hyper_logger_benchmark.dart` and
-`benchmark/cloud_parity_benchmark.dart` (Apple Silicon, Dart VM, AOT).
-Re-run them on your hardware before quoting them anywhere that matters
-— absolute throughput is machine-dependent; the ratios are not.
+Numbers below were captured on 2026-08-21 with Dart 3.13.0 stable's JIT VM on
+macOS arm64 by running `dart run benchmark/hyper_logger_benchmark.dart`,
+`dart run benchmark/cloud_parity_benchmark.dart`,
+`dart run benchmark/deep_dive_benchmark.dart`, and
+`dart run benchmark/redacting_interceptor_benchmark.dart`. Both absolute
+results and ratios depend on the CPU, SDK, compiler mode, process state, and
+workload; re-run the scripts in the deployment-like environment whose behavior
+matters.
 
 ### Hot path (formatting cost per record)
 
 | Printer                                 | Median  | Throughput  |
 | --------------------------------------- | ------: | ----------: |
-| `DirectPrinter` (raw passthrough)       |    11ns |  90.1M ops/s |
-| `ComposablePrinter` (no decorators)     |   411ns |   2.4M ops/s |
-| `LogPrinterPresets.human(ansi+pipe)`    |   573ns |   1.8M ops/s |
-| `LogPrinterPresets.ci`                  |   732ns |   1.4M ops/s |
+| `DirectPrinter` (raw passthrough)       |    12ns |  87.0M ops/s |
+| `ComposablePrinter` (no decorators)     |   278ns |   3.6M ops/s |
+| `LogPrinterPresets.human(ansi+pipe)`    |   445ns |   2.2M ops/s |
+| `LogPrinterPresets.ci`                  |   589ns |   1.7M ops/s |
 | `LogPrinterPresets.gcp` / `aws` / `azure` | ~1.1µs | ~900K ops/s |
-| `LogPrinterPresets.terminal` (full UI)  |   1.8µs |   565K ops/s |
+| `LogPrinterPresets.terminal` (full UI)  |   1.7µs |   591K ops/s |
 
 The terminal preset is the slowest because it composes every decorator
 (emoji, box, ANSI color, prefix) and walks the section list multiple
@@ -140,65 +187,93 @@ section pipeline entirely and emit a single JSON line.
 ### Disabled and filtered paths
 
 These are the calls in production code where the global mode or scoped
-filter rejects the entry — they should be free, and they are:
+filter rejects the entry. They take the following near-zero-cost fast paths:
 
 | Operation                                    | Cost  | Throughput   |
 | -------------------------------------------- | ----: | -----------: |
-| `LogMode.silent` short-circuit               |  10ns |   96M ops/s  |
-| `ScopedLogger(mode: disabled)` early return  |  14ns |   71M ops/s  |
-| `ScopedLogger(minLevel: WARNING)` filtering INFO | 14ns | 70M ops/s |
+| `LogMode.silent` short-circuit               |   5ns |  208M ops/s  |
+| `ScopedLogger(mode: disabled)` early return  |  14ns | 72.5M ops/s  |
+| `ScopedLogger(minLevel: WARNING)` filtering INFO | 14ns | 72.5M ops/s |
 
-The takeaway: leaving `HyperLogger.debug<T>(...)` or
-`HyperLogger.trace<T>(...)` calls in production code costs nothing as
-long as the global mode or a scoped `minLevel` filters them out. There
-is no need to wrap them in `if (kDebugMode)` guards.
+The dispatch overhead of a filtered call is tiny, but Dart evaluates arguments
+before entering the logging method. Use `HyperLogger.isEnabled(...)` around
+expensive argument construction. An `if (kDebugMode)` guard is unnecessary when
+only the logging call itself needs filtering.
+
+### Sanitizer hot paths
+
+The focused `benchmark/redacting_interceptor_benchmark.dart` covers both the
+redactor and its placement in the native pipeline under the runtime described
+above:
+
+| Operation | Cost | Throughput |
+|---|---:|---:|
+| Ordinary text, no literal secrets | 169ns | 5.90M ops/s |
+| Ordinary text, three absent secrets | 292ns | 3.42M ops/s |
+| JSON text, no literal secrets | 1.22µs | 822K ops/s |
+| Complete simple `LogEntry` | 692ns | 1.44M ops/s |
+| Structured entry with ordinary keys | 4.08µs | 245K ops/s |
+| Active HTTP credential removal and revalidation | 976ns | 1.02M ops/s |
+| Native INFO pipeline without sanitizers | 280ns | 3.58M ops/s |
+| Native INFO pipeline with the redactor | 904ns | 1.11M ops/s |
+| No eligible sink | 16ns | 61.0M ops/s |
+
+Unchanged strings and ordinary structured keys use allocation-conscious fast
+paths. Only changed representations pay for fixed-point revalidation. As with
+the printer measurements, re-run the benchmark on target hardware before using
+absolute numbers as a capacity estimate.
 
 ### Cloud printer parity
 
 The three cloud printers share a common base (`CloudJsonPrinterBase`)
-and perform within 5% of each other across all scenarios:
+and performed within 7% of each other across these scenarios in this run:
 
 | Scenario             | GCP    | AWS    | Azure  |
 | -------------------- | -----: | -----: | -----: |
-| Simple INFO          | 1132ns | 1117ns | 1074ns |
-| INFO with `data` map | 1967ns | 1990ns | 1910ns |
-| ERROR with stack     |  22.2µs |  22.4µs |  22.4µs |
+| Simple INFO          | 1113ns | 1055ns | 1040ns |
+| INFO with `data` map | 1990ns | 1985ns | 1957ns |
+| ERROR with stack     |  23.7µs |  24.0µs |  24.0µs |
 
-`AzureJsonPrinter` is marginally faster on the simple path because its
-numeric `severityLevel` skips the string-switch the others need. On the
+In this run, `AzureJsonPrinter` is marginally faster on the simple path because
+its numeric `severityLevel` skips the string-switch the others need. On the
 data-payload scenario it nests user context under `customDimensions`
 (per the AppInsights data model) instead of merging at root, but the
 extra map allocation is small enough not to show up.
 
 ### Error-path latency is dominated by stack-trace parsing
 
-A `SEVERE`-level entry with an `exception` and `stackTrace` costs
-~430µs on terminal/CI presets — orders of magnitude more than a
-plain INFO. The breakdown (from `benchmark/deep_dive_benchmark.dart`):
+A `SEVERE`-level entry with an `exception` and `stackTrace` cost roughly
+690–710µs on terminal/CI presets in this run—orders of magnitude more than a
+plain INFO. The matching deep-dive breakdown is:
 
 | Step                                              | Median  |
 | ------------------------------------------------- | ------: |
-| `Chain.forTrace(StackTrace.current)` (raw parse)  |  28.6µs |
-| `StackTraceParser` (filtering + formatting, n=10) |  84.3µs |
-| `CallerExtractor.extract`                         |  51.7µs |
-| `ContentExtractor.extract` (full error record)    | 427.9µs |
-| `ContentExtractor.extract` (simple INFO, no stack) |  185ns |
+| `StackTrace.current` capture | 633ns |
+| `Chain.forTrace(StackTrace.current)` (raw parse) | 126.7µs |
+| `StackTraceParser` (filtering + formatting, n=10) | 177.8µs |
+| `CallerExtractor.extract` | 149.6µs |
+| `ContentExtractor.extract` (full error record) | 709.1µs |
+| `ContentExtractor.extract` (simple INFO, no stack) | 66ns |
+| Bare `ComposablePrinter` error (`methodCount: 0`) | 442ns |
 
 Cloud printers (GCP/AWS/Azure) skip the chain parse — they pass the
 stack trace through `toString()` straight into the JSON — so error
-records cost ~22µs, not ~430µs. That asymmetry is intentional: human
-readers want pretty per-frame output; cloud aggregators want raw text.
+records cost roughly 24µs, not the 690–710µs measured for terminal/CI. That
+asymmetry is intentional: human readers want pretty per-frame output; cloud
+aggregators want raw text.
 
 If your service emits sustained high-rate error logs and you don't need
-stack-trace grooming, prefer a cloud printer (or
-`StackTraceParser(methodCount: 0)` to skip parsing entirely — that
-drops the cost back to ~21ns).
+stack-trace grooming, prefer a cloud printer or configure the composable
+printer/preset with `methodCount: 0` and a null or zero `errorMethodCount`. That
+made the complete bare-printer error path 442ns in this run. The extractor
+checks the effective frame count before constructing a stack chain, so this
+fast path does not inspect the attached trace.
 
 ### Stack-capture cost
 
 `captureStackTrace: true` (the default) calls `StackTrace.current` on
-every log call that doesn't pass an explicit `method:`. Cost: ~700ns
-per call. On a hot loop, set `captureStackTrace: false` in
+every log call that doesn't pass an explicit `method:`. Capture alone measured
+633ns per call in this run. On a hot loop, set `captureStackTrace: false` in
 `HyperLogger.init(...)` and pass `method:` explicitly; on a normal app
 this is in the noise.
 
@@ -241,9 +316,10 @@ provided).
 
 ### LogEntry
 
-Created from `logging.LogRecord` in `_handleLogRecord()`. This is the
-public-facing record type that printers receive. The `object` field
-contains the original `LogMessage`, which printers like
+Created directly for native calls or from a third-party `logging.LogRecord` in
+`_handleLogRecord()`. This is the public-facing record type that printers
+receive. For native calls, the `object` field contains the `LogMessage`, which
+printers like
 `ComposablePrinter`, `GcpJsonPrinter`, and `AwsJsonPrinter` unwrap to access
 structured data.
 
@@ -264,7 +340,7 @@ member name.
 
 | Package | Purpose |
 |---|---|
-| `logging` | Internal logger tree and record stream |
+| `logging` | Public level/record adapters and inbound third-party record stream |
 | `stack_trace` | Stack trace parsing and caller extraction |
 | `universal_io` | Cross-platform `dart:io` for ANSI detection |
 | `web` | Web console APIs for `WebConsolePrinter` |

@@ -36,9 +36,11 @@ abstract class LogPrinter {
   ///   compression), schedule it off-path inside the implementation
   ///   and surface failures via your own callback (see
   ///   `RotatingFilePrinter`'s `onError`).
-  /// - Must not throw. A printer that throws crashes the caller's
-  ///   log site. Wrap your I/O in `try/catch` and route failures to
-  ///   `stderr` or a user-supplied error hook.
+  /// - Should not throw. `HyperLogger` contains synchronous printer failures
+  ///   and reports them through its configured pipeline error handler, but a
+  ///   caller invoking [log] directly receives the exception. Wrap I/O in
+  ///   `try/catch` and route failures to a user-supplied error hook when the
+  ///   printer can provide a more useful recovery policy.
   /// - No back-pressure. Drop or queue overflow yourself —
   ///   `ThrottledPrinter` is one example of a wrapper that does
   ///   exactly that.

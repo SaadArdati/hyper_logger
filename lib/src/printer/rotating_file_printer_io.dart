@@ -707,12 +707,10 @@ class _RotatingFilePrinterIo implements RotatingFilePrinter {
   ///    awaits → resumes → fails → ... unbounded microtask pump. With
   ///    the guard held, the cycle is bounded by the user's handler
   ///    Future settling.
-  /// 2. Stream-routed reentry escapes zone-scoped guards.
-  ///    `package:logging`'s record stream delivers events in the
-  ///    listener's registration zone, not the emitter's, so a
-  ///    [Zone]-based marker doesn't propagate. A flat boolean held
-  ///    across the Future is the only mechanism that catches every
-  ///    routing path.
+  /// 2. A flat boolean covers both direct HyperLogger reentry and inbound
+  ///    third-party `package:logging` records. The latter can cross into the
+  ///    listener's registration zone, where a [Zone]-based marker would not
+  ///    propagate.
   /// 3. Production telemetry sinks dedupe their own input. Most
   ///    callers wiring `onError` into telemetry already collapse
   ///    bursts; per-record fan-out would multiply that work without

@@ -6,6 +6,7 @@ import 'package:meta/meta.dart';
 
 import 'delegates/crash_reporting_delegate.dart';
 import 'delegates/delegate_safety.dart';
+import 'interceptors/redacting_interceptor.dart';
 import 'lru_cache.dart';
 import 'model/log_entry.dart';
 import 'model/log_level.dart';
@@ -30,7 +31,6 @@ part 'scoped_logger.dart';
 ///
 /// Use cases:
 /// - Filter: drop high-volume health-check logs
-/// - Redact: strip secrets from `entry.message` or structured data
 /// - Enrich: attach hostname, build version, request id
 /// - Sample: emit only 1-in-N noisy events
 ///
@@ -39,11 +39,24 @@ part 'scoped_logger.dart';
 ///   printer: LogPrinterPresets.automatic(),
 ///   interceptors: [
 ///     (entry) => entry.message.contains('/health') ? null : entry,
-///     redactSecrets,
 ///   ],
 /// );
 /// ```
 typedef LogInterceptor = LogEntry? Function(LogEntry entry);
+
+/// One stage in the final privacy boundary applied after ordinary interceptors
+/// and before every output sink.
+///
+/// Returning `null` drops the record. Unlike an ordinary [LogInterceptor], a
+/// thrown sanitizer also drops the record; the previous unsanitized entry is
+/// never forwarded. Use [RedactingInterceptor.call] here rather than placing a
+/// redactor in the ordinary interceptor list.
+///
+/// This final-boundary placement follows the [OWASP Logging Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html)
+/// guidance to remove, mask, or sanitize credentials before recording them.
+/// A sanitizer still needs an application-specific policy for PII, consent,
+/// classification, and log-injection risks.
+typedef LogSanitizer = LogEntry? Function(LogEntry entry);
 
 /// The central static logging API for [hyper_logger].
 ///
@@ -57,7 +70,7 @@ typedef LogInterceptor = LogEntry? Function(LogEntry entry);
 ///
 /// ### Design decisions
 /// - Every public log method is generic (`<T>`) so that the type parameter
-///   is forwarded into [LogMessage.type] for prefix rendering.
+///   determines the canonical `LogEntry.loggerName` used for prefix rendering.
 /// - A per-type-name [logging.Logger] cache avoids repeated allocations.
 /// - Delegate calls ([CrashReportingDelegate]) are fire-and-forget: their
 ///   futures are ignored so that logging never blocks the caller.
@@ -74,6 +87,7 @@ class HyperLogger {
   static bool _captureStackTrace = true;
   static LogPrinter? _printer;
   static List<LogInterceptor> _interceptors = const [];
+  static List<LogSanitizer> _sanitizers = const [];
   static CrashReportingDelegate? _crashReporting;
 
   /// Default maximum number of entries in each LRU cache.
@@ -98,10 +112,10 @@ class HyperLogger {
   /// auto-initializes with platform defaults on first use.
   ///
   /// Can be called at any point to reconfigure: [printer], [mode],
-  /// [interceptors], [captureStackTrace], and [maxCacheSize] are
+  /// [interceptors], [sanitizers], [captureStackTrace], and [maxCacheSize] are
   /// applied on every call (the previous printer is disposed on swap).
-  /// [configureLoggingPackage] and the listener attachment to
-  /// `Logger.root.onRecord` are applied on the first init only —
+  /// [configureLoggingPackage] and the inbound third-party listener attachment
+  /// to `Logger.root.onRecord` are applied on the first init only —
   /// subsequent calls don't re-attach. Use [reset] to fully tear down.
   ///
   /// - [printer] receives formatted log records. Defaults to the
@@ -109,12 +123,17 @@ class HyperLogger {
   ///   `WebConsolePrinter` on web — see `package:hyper_logger/web.dart`).
   /// - [mode] controls global logging behavior. See [LogMode].
   /// - [interceptors] are applied to every record before it reaches the
-  ///   printer. They run in order; an interceptor returning `null` drops the
-  ///   record. See [LogInterceptor] for filtering, redaction, enrichment,
+  ///   sanitizer and output sinks. They run in order; an interceptor returning
+  ///   `null` drops the record. See [LogInterceptor] for filtering, enrichment,
   ///   and sampling examples.
+  /// - [sanitizers] are the final ordered, fail-closed transformations. They
+  ///   run after all ordinary interceptors and before both crash reporting and
+  ///   the printer. Any sanitizer returning `null` or throwing drops the record
+  ///   from every sink.
   /// - [captureStackTrace] when `true` (default), captures [StackTrace.current]
   ///   on every log call that doesn't provide a `method:` parameter, enabling
-  ///   automatic caller extraction. Set to `false` to skip the ~700ns overhead.
+  ///   automatic caller extraction. Set to `false` to avoid that
+  ///   platform-dependent capture cost.
   /// - [configureLoggingPackage] when `true` (default), sets
   ///   `hierarchicalLoggingEnabled = true` and `Logger.root.level = Level.ALL`
   ///   on the underlying `package:logging` during the first init. Set
@@ -127,6 +146,7 @@ class HyperLogger {
     LogPrinter? printer,
     LogMode mode = LogMode.enabled,
     List<LogInterceptor>? interceptors,
+    List<LogSanitizer>? sanitizers,
     bool captureStackTrace = true,
     bool configureLoggingPackage = true,
     int maxCacheSize = defaultMaxCacheSize,
@@ -157,6 +177,9 @@ class HyperLogger {
     _interceptors = interceptors == null
         ? const []
         : List<LogInterceptor>.unmodifiable(interceptors);
+    _sanitizers = sanitizers == null
+        ? const []
+        : List<LogSanitizer>.unmodifiable(sanitizers);
 
     if (_loggerCache.maxSize != maxCacheSize) {
       _loggerCache = LruCache(maxCacheSize);
@@ -197,12 +220,10 @@ class HyperLogger {
 
   /// The currently attached crash-reporting delegate, or `null`.
   ///
-  /// Read by [ScopedLogger] in silent mode to fire the delegate
-  /// directly, and by tests asserting attach state. External callers
-  /// should generally route through [warning], [error], and [fatal]
-  /// (which guard the invocation with [fireDelegateSafely]) rather
-  /// than holding a long-lived reference — a later [attachServices]
-  /// call may replace the delegate.
+  /// Scoped and unscoped calls both reach this delegate through the shared
+  /// dispatch pipeline. External callers should generally route through
+  /// [warning], [error], and [fatal] rather than holding a long-lived
+  /// reference—a later [attachServices] call may replace the delegate.
   @internal
   static CrashReportingDelegate? get crashReporting => _crashReporting;
 
@@ -211,38 +232,63 @@ class HyperLogger {
     _crashReporting = null;
   }
 
-  /// The current global [LogMode]. Exposed so [ScopedLogger] can honor
-  /// the "global ceiling" contract — when global is `LogMode.disabled`,
-  /// scoped logs (including the silent-mode delegate fires) must NOT
-  /// invoke crash reporting. Scoped mode can only be more restrictive
-  /// than the global mode, never less.
-  @internal
-  static LogMode get mode => _mode;
-
   /// Resets all static state. Intended for test teardown so that each test
   /// starts with a clean slate. The current printer is disposed so its
   /// owned resources (timers, file handles) don't leak across tests.
+  ///
+  /// The next log call auto-initializes with platform defaults. Use [shutdown]
+  /// at application exit when later log calls must remain disabled.
   static void reset() {
-    if (_printer != null) {
+    final subscription = _tearDown(nextMode: LogMode.enabled);
+    subscription?.cancel();
+  }
+
+  /// Tears down the active session and disables implicit re-initialization.
+  ///
+  /// This method is idempotent. It disposes the active printer, detaches
+  /// services, removes interceptors and pipeline handlers, clears caches, and
+  /// awaits cancellation of the root logging subscription. Later log calls are
+  /// no-ops until an explicit [init] starts a fresh session.
+  ///
+  /// Printer-specific asynchronous work is outside this contract. Drain or
+  /// close a stateful printer before calling this method.
+  static Future<void> shutdown() async {
+    final subscription = _tearDown(nextMode: LogMode.disabled);
+    try {
+      await subscription?.cancel();
+    } catch (_) {
+      // Logging teardown remains best-effort and must not fail app shutdown.
+    }
+  }
+
+  static StreamSubscription<logging.LogRecord>? _tearDown({
+    required LogMode nextMode,
+  }) {
+    // Gate all global and existing scoped loggers before disposal begins.
+    _mode = LogMode.disabled;
+    final activePrinter = _printer;
+    if (activePrinter != null) {
       try {
-        _printer!.dispose();
+        activePrinter.dispose();
       } catch (_) {
-        // dispose() must not crash test teardown.
+        // Teardown is best-effort; a broken printer cannot keep logging alive.
       }
     }
+    final activeSubscription = _subscription;
     _initialized = false;
-    _mode = LogMode.enabled;
+    _mode = nextMode;
     _captureStackTrace = true;
     _printer = null;
     _interceptors = const [];
+    _sanitizers = const [];
     _crashReporting = null;
     _pipelineErrorHandler = null;
     _pipelineErrorReportedSources.clear();
     _pendingLogLevel = null;
-    _subscription?.cancel();
     _subscription = null;
     _loggerCache.clear();
     _wrapperCache.clear();
+    return activeSubscription;
   }
 
   // ── log level ──────────────────────────────────────────────────────────────
@@ -383,15 +429,13 @@ class HyperLogger {
   }) {
     if (_mode == LogMode.disabled) return;
     _ensureInitialized();
-    // Delegates fire in silent mode.
-    fireDelegateSafely(() => _crashReporting?.log(message));
-    if (_mode == LogMode.silent) return;
     _log<T>(
       logging.Level.WARNING,
       message,
       data: data,
       method: method,
       context: context,
+      reportToCrashReporting: true,
     );
   }
 
@@ -422,22 +466,6 @@ class HyperLogger {
   }) {
     if (_mode == LogMode.disabled) return;
     _ensureInitialized();
-    // Delegates fire in silent mode.
-    // `skipCrashReporting == null` means "no opinion, use the default
-    // (do report)". The parameter is nullable so callers in scoped
-    // paths can forward `null` and let `LoggerOptions.skipCrashReporting`
-    // decide downstream — passing a non-null `false` would always
-    // override an option configured to skip.
-    if (!(skipCrashReporting ?? false)) {
-      fireDelegateSafely(
-        () => _crashReporting?.recordError(
-          exception ?? message,
-          stackTrace,
-          reason: message,
-        ),
-      );
-    }
-    if (_mode == LogMode.silent) return;
     _log<T>(
       logging.Level.SEVERE,
       message,
@@ -446,6 +474,7 @@ class HyperLogger {
       error: exception,
       stackTrace: stackTrace,
       context: context,
+      reportToCrashReporting: !(skipCrashReporting ?? false),
     );
   }
 
@@ -474,16 +503,6 @@ class HyperLogger {
   }) {
     if (_mode == LogMode.disabled) return;
     _ensureInitialized();
-    // Delegates fire in silent mode.
-    fireDelegateSafely(
-      () => _crashReporting?.recordError(
-        exception ?? message,
-        stackTrace,
-        fatal: true,
-        reason: message,
-      ),
-    );
-    if (_mode == LogMode.silent) return;
     _log<T>(
       logging.Level.SHOUT,
       message,
@@ -492,6 +511,7 @@ class HyperLogger {
       error: exception,
       stackTrace: stackTrace,
       context: context,
+      reportToCrashReporting: true,
     );
   }
 
@@ -650,10 +670,12 @@ class HyperLogger {
     StackTrace? stackTrace,
     Map<String, Object?>? context,
     required String? scopeTag,
+    bool reportToCrashReporting = false,
+    bool suppressPrinter = false,
   }) {
     if (_mode == LogMode.disabled) return;
     _ensureInitialized();
-    if (_mode == LogMode.silent) return;
+    if (_mode == LogMode.silent && !reportToCrashReporting) return;
     _log<T>(
       level.toLoggingLevel(),
       message,
@@ -663,24 +685,27 @@ class HyperLogger {
       stackTrace: stackTrace,
       context: context,
       scopeTag: scopeTag,
+      reportToCrashReporting: reportToCrashReporting,
+      suppressPrinter: suppressPrinter,
     );
   }
 
   // ── private helpers ────────────────────────────────────────────────────────
 
-  /// Returns a [logging.Logger] for type [T], creating and caching it on
-  /// first access. Child loggers inherit root's level so that
-  /// [setLogLevel] controls the threshold globally.
+  /// Returns the cached `package:logging` level view for type [T].
+  ///
+  /// Native records are not published to its stream; the logger is retained
+  /// only so package-level hierarchy and [setLogLevel] control filtering.
   static logging.Logger _getLogger<T>() {
     final name = T.toString();
     return _loggerCache.putIfAbsent(name, () => logging.Logger(name));
   }
 
-  /// Core log dispatch. Creates a [LogMessage], wraps it in a
-  /// [logging.LogRecord] via the per-type [logging.Logger], and publishes.
+  /// Core log dispatch. Native calls enter HyperLogger's pipeline directly;
+  /// `package:logging` is only an inbound bridge for third-party records.
   ///
   /// [StackTrace.current] is only captured when [method] is null — this avoids
-  /// the ~700ns overhead on every log call when the caller already provides a
+  /// the platform-dependent capture cost when the caller already provides a
   /// method name or when the stack trace would be discarded anyway.
   static void _log<T>(
     logging.Level level,
@@ -691,23 +716,25 @@ class HyperLogger {
     StackTrace? stackTrace,
     Map<String, Object?>? context,
     String? scopeTag,
+    bool reportToCrashReporting = false,
+    bool suppressPrinter = false,
   }) {
+    if (!_hasEligibleSink(
+      level,
+      reportToCrashReporting: reportToCrashReporting,
+      suppressPrinter: suppressPrinter,
+    )) {
+      return;
+    }
     final logger = _getLogger<T>();
-    // Gate the heavy work (StackTrace.current capture, LogMessage
-    // allocation) behind the level filter — `logger.log` would drop
-    // the record otherwise, and a filtered-out debug call shouldn't
-    // pay the cost.
+    // Gate StackTrace and payload allocation behind the level filter.
     if (!logger.isLoggable(level)) return;
     // Skip the expensive StackTrace.current capture when method is already
     // provided or when capture is disabled via init(captureStackTrace: false).
     final callerStack = _captureStackTrace && method == null
         ? StackTrace.current
         : null;
-    // Capture the timestamp HERE rather than in the stream listener.
-    // `package:logging` listeners run in the zone where `init()` was
-    // called, not the caller's zone — so reading `clock.now()` from the
-    // listener would miss any test-scoped `withClock(...)`. Capturing at
-    // the emit site preserves the caller's zone end-to-end.
+    final emitTime = clock.now();
     final logMessage = LogMessage(
       message,
       T,
@@ -715,12 +742,24 @@ class HyperLogger {
       method: method,
       callerStackTrace: callerStack,
       context: context,
-      time: clock.now(),
+      time: emitTime,
       scopeTag: scopeTag,
+      reportToCrashReporting: reportToCrashReporting,
     );
-    // Pass logMessage as the message parameter (Object?). The logging package
-    // will set record.object = logMessage and record.message = logMessage.toString().
-    logger.log(level, logMessage, error, stackTrace);
+    _handleEntry(
+      LogEntry(
+        level: LogLevel.fromLoggingLevel(level),
+        message: message,
+        object: logMessage,
+        loggerName: logger.name,
+        time: emitTime,
+        error: error,
+        stackTrace: stackTrace,
+        tag: scopeTag,
+      ),
+      reportToCrashReporting: reportToCrashReporting,
+      suppressPrinter: suppressPrinter,
+    );
   }
 
   /// Listener wired to [logging.Logger.root.onRecord].
@@ -728,33 +767,124 @@ class HyperLogger {
   /// Each interceptor runs in its own try/catch: a thrown interceptor is
   /// skipped (the previous entry is preserved) so one buggy hook can't
   /// black-hole the entire pipeline. Returning `null` is the explicit way
-  /// to drop a record. The printer call is in its own try/catch so a bad
-  /// printer never crashes the app.
+  /// to drop a record. Sanitizers then run fail-closed before printer dispatch.
+  /// Third-party records are printer-only and never reach the crash-reporting
+  /// delegate. The printer call is in its own try/catch so a bad printer never
+  /// crashes the app.
   static void _handleLogRecord(logging.LogRecord record) {
-    if (_mode != LogMode.enabled) return;
+    if (_mode == LogMode.disabled) return;
+    if (!_hasEligibleSink(
+      record.level,
+      reportToCrashReporting: false,
+      suppressPrinter: false,
+    )) {
+      return;
+    }
     LogEntry entry;
     try {
       entry = LogEntry.fromLogRecord(record);
-    } catch (e, st) {
-      _reportPipelineError('LogEntry.fromLogRecord', e, st);
+    } catch (_, st) {
+      _reportPipelineError(
+        'LogEntry.fromLogRecord',
+        StateError('The log record could not be converted.'),
+        st,
+      );
       return;
     }
+    _handleEntry(entry, reportToCrashReporting: false, suppressPrinter: false);
+  }
+
+  static void _handleEntry(
+    LogEntry entry, {
+    required bool reportToCrashReporting,
+    required bool suppressPrinter,
+  }) {
     for (final interceptor in _interceptors) {
       try {
         final next = interceptor(entry);
         if (next == null) return; // Explicit drop short-circuits the chain.
-        entry = next;
-      } catch (e, st) {
+        entry = _synchronizeLogMessage(next);
+      } catch (_, st) {
         // Skip this interceptor; carry the previous entry forward.
-        _reportPipelineError('interceptor', e, st);
+        _reportPipelineError(
+          'interceptor',
+          StateError('The configured interceptor failed.'),
+          st,
+        );
       }
     }
+    for (final sanitizer in _sanitizers) {
+      try {
+        final sanitized = sanitizer(entry);
+        if (sanitized == null) return;
+        entry = _synchronizeLogMessage(sanitized);
+      } catch (_, st) {
+        _reportPipelineError(
+          'sanitizer',
+          StateError('The configured sanitizer failed.'),
+          st,
+        );
+        return;
+      }
+    }
+    if (reportToCrashReporting) {
+      _dispatchCrashReporting(entry);
+    }
+    if (_mode == LogMode.silent || suppressPrinter) return;
     try {
       _printer?.log(entry);
     } catch (e, st) {
       // Logging should never crash the app.
       _reportPipelineError('printer.log', e, st);
     }
+  }
+
+  /// Whether a record can reach at least one configured output sink.
+  ///
+  /// This check deliberately precedes [LogMessage] and [LogEntry] allocation
+  /// as well as interceptor/sanitizer traversal. Silent and scoped-suppressed
+  /// calls therefore remain genuinely cheap even with expensive sanitizers.
+  static bool _hasEligibleSink(
+    logging.Level level, {
+    required bool reportToCrashReporting,
+    required bool suppressPrinter,
+  }) {
+    if (_mode == LogMode.disabled) return false;
+    if (_mode == LogMode.enabled && !suppressPrinter && _printer != null) {
+      return true;
+    }
+    return reportToCrashReporting &&
+        _crashReporting != null &&
+        level >= logging.Level.WARNING;
+  }
+
+  static void _dispatchCrashReporting(LogEntry entry) {
+    switch (entry.level) {
+      case LogLevel.trace || LogLevel.debug || LogLevel.info:
+        return;
+      case LogLevel.warning:
+        fireDelegateSafely(() => _crashReporting?.log(entry.message));
+        return;
+      case LogLevel.error || LogLevel.fatal:
+        fireDelegateSafely(
+          () => _crashReporting?.recordError(
+            entry.error ?? entry.message,
+            entry.stackTrace,
+            fatal: entry.level == LogLevel.fatal,
+            reason: entry.message,
+          ),
+        );
+    }
+  }
+
+  /// Keeps [LogMessage.message] as a compatibility mirror of the canonical
+  /// [LogEntry.message] between pipeline stages and before custom printers.
+  static LogEntry _synchronizeLogMessage(LogEntry entry) {
+    final object = entry.object;
+    if (object is! LogMessage || object.message == entry.message) return entry;
+    return entry.copyWith(
+      object: () => object.copyWith(message: entry.message),
+    );
   }
 
   /// Reports a pipeline error via [_pipelineErrorHandler] when set, with
@@ -786,7 +916,7 @@ class HyperLogger {
 
   /// Sets a callback invoked when an internal pipeline component throws
   /// during log processing — currently `LogEntry.fromLogRecord`,
-  /// interceptors, or `printer.log`.
+  /// interceptors, sanitizers, or `printer.log`.
   ///
   /// The callback is rate-limited to one invocation per failure
   /// source per session to avoid feedback loops. This is intended for

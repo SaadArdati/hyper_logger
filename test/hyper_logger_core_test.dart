@@ -44,6 +44,7 @@ class _RecordingCrashReporting extends CrashReportingDelegate {
 List<String> _initCapturing({
   LogMode mode = LogMode.enabled,
   List<LogInterceptor>? interceptors,
+  List<LogSanitizer>? sanitizers,
   bool captureStackTrace = true,
   bool configureLoggingPackage = true,
   int maxCacheSize = HyperLogger.defaultMaxCacheSize,
@@ -53,6 +54,7 @@ List<String> _initCapturing({
     printer: DirectPrinter(output: captured.add),
     mode: mode,
     interceptors: interceptors,
+    sanitizers: sanitizers,
     captureStackTrace: captureStackTrace,
     configureLoggingPackage: configureLoggingPackage,
     maxCacheSize: maxCacheSize,
@@ -92,6 +94,7 @@ void main() {
           printer: DirectPrinter(output: (_) {}),
           mode: LogMode.silent,
           interceptors: [(e) => e],
+          sanitizers: [(e) => e],
           captureStackTrace: false,
           configureLoggingPackage: false,
           maxCacheSize: 128,
@@ -140,6 +143,20 @@ void main() {
       HyperLogger.init(
         printer: DirectPrinter(output: captured.add),
         interceptors: [(e) => e],
+      );
+      HyperLogger.info<String>('passed');
+      expect(captured, isNotEmpty);
+    });
+
+    test('re-init replaces sanitizers', () {
+      final captured = _initCapturing(sanitizers: [(_) => null]);
+      HyperLogger.info<String>('dropped');
+      expect(captured, isEmpty);
+
+      captured.clear();
+      HyperLogger.init(
+        printer: DirectPrinter(output: captured.add),
+        sanitizers: [(entry) => entry],
       );
       HyperLogger.info<String>('passed');
       expect(captured, isNotEmpty);
@@ -217,6 +234,28 @@ void main() {
       expect(identical(a, b), isFalse);
     });
 
+    test('clears sanitizers', () {
+      var sanitizerCalls = 0;
+      HyperLogger.init(
+        printer: _RecordingPrinter(),
+        sanitizers: [
+          (entry) {
+            sanitizerCalls++;
+            return null;
+          },
+        ],
+      );
+      HyperLogger.info<String>('before');
+      HyperLogger.reset();
+
+      final printer = _RecordingPrinter();
+      HyperLogger.init(printer: printer);
+      HyperLogger.info<String>('after');
+
+      expect(sanitizerCalls, 1);
+      expect(printer.entries, hasLength(1));
+    });
+
     test('resets mode to enabled', () {
       _initCapturing(mode: LogMode.disabled);
       HyperLogger.reset();
@@ -251,6 +290,49 @@ void main() {
             'reset() must dispose the previous printer to avoid '
             'leaking timers / file handles across test setUp/tearDown',
       );
+    });
+  });
+
+  group('shutdown()', () {
+    test('disposes state and keeps later log calls disabled', () async {
+      final printer = _RecordingPrinter();
+      final crash = _RecordingCrashReporting();
+      HyperLogger.init(printer: printer);
+      HyperLogger.attachServices(crashReporting: crash);
+      HyperLogger.info<String>('before');
+
+      await HyperLogger.shutdown();
+      HyperLogger.info<String>('after');
+
+      expect(printer.entries, hasLength(1));
+      expect(printer.disposeCalls, 1);
+      expect(HyperLogger.crashReporting, isNull);
+      expect(HyperLogger.isEnabled(LogLevel.info), isFalse);
+    });
+
+    test('is idempotent', () async {
+      final printer = _RecordingPrinter();
+      HyperLogger.init(printer: printer);
+
+      await HyperLogger.shutdown();
+      await HyperLogger.shutdown();
+
+      expect(printer.disposeCalls, 1);
+      expect(HyperLogger.isEnabled(LogLevel.error), isFalse);
+    });
+
+    test('an explicit init starts a fresh logging session', () async {
+      final first = _RecordingPrinter();
+      final second = _RecordingPrinter();
+      HyperLogger.init(printer: first);
+      await HyperLogger.shutdown();
+
+      HyperLogger.info<String>('dropped');
+      HyperLogger.init(printer: second);
+      HyperLogger.info<String>('fresh');
+
+      expect(first.entries, isEmpty);
+      expect(second.entries.single.message, contains('fresh'));
     });
   });
 
@@ -312,13 +394,8 @@ void main() {
     });
 
     test('setLogLevel before init() persists through implicit init', () {
-      // Round-8 regression case: previously, calling setLogLevel before
-      // any other HyperLogger entry point set
-      // `logging.Logger.root.level` directly without triggering
-      // initialization. The first subsequent log call hit
-      // `_ensureInitialized()`, which calls `init()`, which resets the
-      // root to `Level.ALL` — silently overwriting the level the user
-      // configured. Round-8 fix: setLogLevel triggers init itself.
+      // A pre-init level is buffered so the next implicit initialization
+      // cannot overwrite it with the default Level.ALL threshold.
       HyperLogger.reset();
       HyperLogger.setLogLevel(LogLevel.warning);
       // No `init()` between — the next call must NOT reset to ALL.
@@ -647,6 +724,171 @@ void main() {
     });
   });
 
+  group('sanitizers', () {
+    test('run after interceptors in declaration order', () {
+      final printer = _RecordingPrinter();
+      final stages = <String>[];
+      HyperLogger.init(
+        printer: printer,
+        interceptors: [
+          (entry) => entry.copyWith(message: '${entry.message}:interceptor'),
+        ],
+        sanitizers: [
+          (entry) {
+            stages.add(entry.message);
+            return entry.copyWith(message: '${entry.message}:first');
+          },
+          (entry) {
+            stages.add(entry.message);
+            return entry.copyWith(message: '${entry.message}:second');
+          },
+        ],
+      );
+
+      HyperLogger.info<String>('entry');
+
+      expect(stages, ['entry:interceptor', 'entry:interceptor:first']);
+      expect(printer.entries.single.message, 'entry:interceptor:first:second');
+    });
+
+    test('first null short-circuits the chain and every sink', () async {
+      final printer = _RecordingPrinter();
+      final crash = _RecordingCrashReporting();
+      var laterCalled = false;
+      HyperLogger.init(
+        printer: printer,
+        sanitizers: [
+          (_) => null,
+          (entry) {
+            laterCalled = true;
+            return entry;
+          },
+        ],
+      );
+      HyperLogger.attachServices(crashReporting: crash);
+
+      HyperLogger.error<String>('drop');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(laterCalled, isFalse);
+      expect(printer.entries, isEmpty);
+      expect(crash.errors, isEmpty);
+    });
+
+    test('do not run when no output sink is eligible', () {
+      var sanitizerCalls = 0;
+      HyperLogger.init(
+        printer: _RecordingPrinter(),
+        mode: LogMode.silent,
+        sanitizers: [
+          (entry) {
+            sanitizerCalls++;
+            return entry;
+          },
+        ],
+        captureStackTrace: false,
+      );
+
+      HyperLogger.error<String>('static', skipCrashReporting: true);
+      HyperLogger.withOptions<String>(
+        mode: LogMode.silent,
+        skipCrashReporting: true,
+      ).error('scoped');
+      logging.Logger('third.party.without.sink').warning('third party');
+
+      expect(sanitizerCalls, 0);
+    });
+
+    test('still run for a delegate-only record in silent mode', () async {
+      final crash = _RecordingCrashReporting();
+      var sanitizerCalls = 0;
+      HyperLogger.init(
+        printer: _RecordingPrinter(),
+        mode: LogMode.silent,
+        sanitizers: [
+          (entry) {
+            sanitizerCalls++;
+            return entry;
+          },
+        ],
+        captureStackTrace: false,
+      );
+      HyperLogger.attachServices(crashReporting: crash);
+
+      HyperLogger.error<String>('delegate only');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(sanitizerCalls, 1);
+      expect(crash.errors, hasLength(1));
+    });
+
+    test('native calls never broadcast an unsanitized logging record', () {
+      const secret = 'root-stream-secret';
+      final printer = _RecordingPrinter();
+      final externalRecords = <logging.LogRecord>[];
+      final redactor = RedactingInterceptor(secrets: const [secret]);
+      HyperLogger.init(
+        printer: printer,
+        sanitizers: [redactor.call],
+        captureStackTrace: false,
+      );
+      final subscription = logging.Logger.root.onRecord.listen(
+        externalRecords.add,
+      );
+      addTearDown(subscription.cancel);
+
+      HyperLogger.error<String>(secret, skipCrashReporting: true);
+
+      expect(externalRecords, isEmpty);
+      expect(printer.entries.single.message, isNot(contains(secret)));
+    });
+
+    test('third-party logging records still enter the sanitizer chain', () {
+      const secret = 'third-party-secret';
+      final printer = _RecordingPrinter();
+      final redactor = RedactingInterceptor(secrets: const [secret]);
+      HyperLogger.init(
+        printer: printer,
+        sanitizers: [redactor.call],
+        captureStackTrace: false,
+      );
+
+      logging.Logger('third.party.inbound').warning(secret);
+
+      expect(printer.entries.single.message, isNot(contains(secret)));
+    });
+
+    test(
+      'third-party records are printer-only and silent mode drops them',
+      () async {
+        final printer = _RecordingPrinter();
+        final crash = _RecordingCrashReporting();
+        HyperLogger.init(printer: printer, captureStackTrace: false);
+        HyperLogger.attachServices(crashReporting: crash);
+
+        logging.Logger('third.party.enabled').warning('enabled');
+        await Future<void>.delayed(Duration.zero);
+
+        expect(printer.entries.single.message, 'enabled');
+        expect(crash.logs, isEmpty);
+        expect(crash.errors, isEmpty);
+
+        printer.entries.clear();
+        HyperLogger.init(
+          printer: printer,
+          mode: LogMode.silent,
+          captureStackTrace: false,
+        );
+        logging.Logger('third.party.silent').warning('silent');
+        await Future<void>.delayed(Duration.zero);
+
+        expect(printer.entries, isEmpty);
+        expect(crash.logs, isEmpty);
+        expect(crash.errors, isEmpty);
+      },
+    );
+  });
+
   // ── setLogLevel ───────────────────────────────────────────────────────────
 
   group('setLogLevel', () {
@@ -655,16 +897,12 @@ void main() {
       HyperLogger.init(printer: printer);
       HyperLogger.setLogLevel(LogLevel.warning);
 
-      // After setting root level to WARNING, the child loggers inherit
-      // the root level in hierarchical mode. Records below WARNING
-      // should not be emitted by child loggers.
       HyperLogger.info<String>('below threshold');
       HyperLogger.warning<String>('at threshold');
 
-      // Child loggers are created with Level.ALL by default but the
-      // root.onRecord listener still fires for all. The _handleLogRecord
-      // does not check the level again. So this test just ensures no crash.
-      expect(true, isTrue);
+      expect(printer.entries, hasLength(1));
+      expect(printer.entries.single.level, LogLevel.warning);
+      expect(printer.entries.single.message, 'at threshold');
     });
 
     test('setting level to fatal is the most restrictive', () {
@@ -722,6 +960,19 @@ void main() {
   // ── error with skipCrashReporting ─────────────────────────────────────────
 
   group('error skipCrashReporting', () {
+    test('exposes routing metadata to custom printers', () {
+      final printer = _RecordingPrinter();
+      HyperLogger.init(printer: printer, captureStackTrace: false);
+
+      HyperLogger.error<String>('routed');
+      HyperLogger.error<String>('printer only', skipCrashReporting: true);
+
+      final routed = printer.entries[0].object! as LogMessage;
+      final printerOnly = printer.entries[1].object! as LogMessage;
+      expect(routed.reportToCrashReporting, isTrue);
+      expect(printerOnly.reportToCrashReporting, isFalse);
+    });
+
     test('false (default) forwards to crash reporting', () async {
       _initCapturing();
       final crash = _RecordingCrashReporting();

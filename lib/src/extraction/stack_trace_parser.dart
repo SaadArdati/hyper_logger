@@ -40,14 +40,14 @@ class StackTraceParser {
   }) {
     if (stackTrace == null) return const [];
 
-    final chain =
-        prebuiltChain ??
-        (stackTrace is Chain ? stackTrace : Chain.forTrace(stackTrace));
     final effectiveMethodCount = isError
         ? (errorMethodCount ?? methodCount)
         : methodCount;
-
     if (effectiveMethodCount == 0) return const [];
+
+    final chain =
+        prebuiltChain ??
+        (stackTrace is Chain ? stackTrace : Chain.forTrace(stackTrace));
 
     final result = <String>[];
     var isFirstTrace = true;
@@ -129,6 +129,13 @@ class StackTraceParser {
 
     return result;
   }
+
+  /// Whether parsing is enabled for an entry with the given error state.
+  ///
+  /// This check performs no stack-trace inspection. Callers can use it before
+  /// constructing a [Chain], ensuring a zero frame limit is a true fast path.
+  bool shouldParse({bool isError = false}) =>
+      (isError ? (errorMethodCount ?? methodCount) : methodCount) != 0;
 
   /// Returns true if [frame] should be excluded from output.
   bool _shouldDiscard(Frame frame) {

@@ -51,9 +51,9 @@ class ContentExtractor {
   final StackTraceParser stackTraceParser;
   final CallerExtractor callerExtractor;
 
-  /// When `true`, the extractor skips rendering `Type.toString()` into
-  /// the className section. Useful in production / minified builds
-  /// where type names may have been mangled.
+  /// When `true`, the extractor skips rendering [LogEntry.loggerName] into the
+  /// className section. Useful in production / minified builds where the name
+  /// originated from a mangled `Type.toString()` value.
   final bool suppressTypeNames;
 
   const ContentExtractor({
@@ -70,9 +70,7 @@ class ContentExtractor {
 
     if (object is LogMessage) {
       // ── message section ──────────────────────────────────────────────────
-      sections.add(
-        LogSection(SectionKind.message, _splitLines(object.message)),
-      );
+      sections.add(LogSection(SectionKind.message, _splitLines(entry.message)));
 
       // ── data section ─────────────────────────────────────────────────────
       final data = object.data;
@@ -91,12 +89,11 @@ class ContentExtractor {
       }
 
       // ── className / methodName ────────────────────────────────────────────
-      // In release/minified builds, Type.toString() may return mangled
-      // names. Skip type rendering when [suppressTypeNames] is set.
+      // In release/minified builds the canonical logger name may have come
+      // from a mangled Type.toString(). Skip it when requested.
       if (!suppressTypeNames) {
-        final typeName = object.type.toString();
-        if (!isGenericLoggerName(typeName)) {
-          className = typeName;
+        if (!isGenericLoggerName(entry.loggerName)) {
+          className = entry.loggerName;
         }
       }
 
@@ -131,14 +128,15 @@ class ContentExtractor {
 
     // ── stackTrace section ───────────────────────────────────────────────────
     final stackTrace = entry.stackTrace;
-    if (stackTrace != null) {
+    final isError = error != null;
+    if (stackTrace != null && stackTraceParser.shouldParse(isError: isError)) {
       // Parse the chain once, share with parser.
       final chain = stackTrace is Chain
           ? stackTrace
           : Chain.forTrace(stackTrace);
       final stLines = stackTraceParser.parse(
         stackTrace,
-        isError: error != null,
+        isError: isError,
         prebuiltChain: chain,
       );
       if (stLines.isNotEmpty) {

@@ -29,17 +29,21 @@ List<String> _frameLines(String formatted) =>
 
 /// Builds a minimal [LogEntry].
 LogEntry _record({
-  String message = 'test message',
+  String? message,
   Object? object,
   LogLevel level = LogLevel.info,
   Object? error,
   StackTrace? stackTrace,
+  String? loggerName,
 }) {
   return LogEntry(
     level: level,
-    message: message,
+    message:
+        message ?? (object is LogMessage ? object.message : 'test message'),
     object: object,
-    loggerName: 'test.logger',
+    loggerName:
+        loggerName ??
+        (object is LogMessage ? object.type.toString() : 'test.logger'),
     time: DateTime.now(),
     error: error,
     stackTrace: stackTrace,
@@ -63,6 +67,16 @@ class _TrackingDecorator extends LogDecorator {
   void apply(LogStyle style) {
     applyCalls++;
     action(style);
+  }
+}
+
+final class _ThrowingStackTrace implements StackTrace {
+  int toStringCalls = 0;
+
+  @override
+  String toString() {
+    toStringCalls++;
+    throw StateError('stack trace must not be inspected');
   }
 }
 
@@ -302,6 +316,19 @@ void main() {
       final p = LogPrinterPresets.ci(methodCount: 0);
       final out = _format(p, _record(stackTrace: _chain(_frames)));
       expect(out, isNot(contains('#0')));
+    });
+
+    test('methodCount: 0 never inspects the stack trace on first use', () {
+      final stackTrace = _ThrowingStackTrace();
+      final p = ComposablePrinter(const [], methodCount: 0);
+      final entry = _record(
+        object: const LogMessage('failed', String, method: 'run'),
+        error: StateError('failed'),
+        stackTrace: stackTrace,
+      );
+
+      expect(() => p.format(entry), returnsNormally);
+      expect(stackTrace.toStringCalls, 0);
     });
 
     test('methodCount caps the frames rendered', () {

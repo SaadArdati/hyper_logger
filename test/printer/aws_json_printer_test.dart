@@ -7,7 +7,7 @@ import 'package:test/test.dart';
 
 /// Builds a minimal [LogEntry].
 LogEntry _record({
-  String message = 'test message',
+  String? message,
   Object? object,
   LogLevel level = LogLevel.info,
   Object? error,
@@ -15,7 +15,8 @@ LogEntry _record({
 }) {
   return LogEntry(
     level: level,
-    message: message,
+    message:
+        message ?? (object is LogMessage ? object.message : 'test message'),
     object: object,
     loggerName: 'test.logger',
     time: DateTime.now(),
@@ -110,10 +111,10 @@ void main() {
   // ── LogMessage structured data ────────────────────────────────────────────
 
   group('AwsJsonPrinter with LogMessage', () {
-    test('uses LogMessage.message over record.message', () {
+    test('uses canonical LogEntry.message over its LogMessage mirror', () {
       final msg = LogMessage('structured text', String);
       final json = _parse(_record(message: 'raw', object: msg));
-      expect(json['message'], equals('structured text'));
+      expect(json['message'], equals('raw'));
     });
 
     test('includes LogMessage.data under "data" key', () {

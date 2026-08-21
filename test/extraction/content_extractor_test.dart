@@ -11,17 +11,20 @@ import 'package:test/test.dart';
 
 /// Builds a minimal [LogEntry] from the supplied values.
 LogEntry _record({
-  String message = '',
+  String? message,
   Object? object,
   Object? error,
   StackTrace? stackTrace,
   LogLevel level = LogLevel.info,
+  String? loggerName,
 }) {
   return LogEntry(
     level: level,
-    message: message,
+    message: message ?? (object is LogMessage ? object.message : ''),
     object: object,
-    loggerName: 'test.logger',
+    loggerName:
+        loggerName ??
+        (object is LogMessage ? object.type.toString() : 'test.logger'),
     time: DateTime.now(),
     error: error,
     stackTrace: stackTrace,
@@ -180,7 +183,7 @@ void main() {
       expect(result.sections.any((s) => s.kind == SectionKind.data), isFalse);
     });
 
-    test('extracts className from LogMessage.type, skips dynamic', () {
+    test('extracts className from canonical loggerName, skips dynamic', () {
       final ext = _extractor();
       final msg = LogMessage('msg', dynamic);
       final record = _record(object: msg);
@@ -190,7 +193,7 @@ void main() {
       expect(result.className, isNull);
     });
 
-    test('extracts className from LogMessage.type, skips Object', () {
+    test('extracts className from canonical loggerName, skips Object', () {
       final ext = _extractor();
       final msg = LogMessage('msg', Object);
       final record = _record(object: msg);
@@ -200,7 +203,7 @@ void main() {
       expect(result.className, isNull);
     });
 
-    test('extracts className from LogMessage.type for a real type', () {
+    test('extracts className from canonical loggerName for a real type', () {
       final ext = _extractor();
       final msg = LogMessage('msg', String);
       final record = _record(object: msg);
@@ -239,7 +242,7 @@ void main() {
       );
       expect(msgSection.lines, equals(['msg']));
 
-      // className should be 'String' (from LogMessage.type).
+      // className should be 'String' (from the canonical loggerName).
       expect(result.className, equals('String'));
 
       // CallerExtractor may or may not resolve a methodName from the stack,

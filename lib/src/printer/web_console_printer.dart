@@ -47,7 +47,7 @@ class WebConsolePrinter implements LogPrinter {
   /// [methodCount] when null).
   final int? errorMethodCount;
 
-  /// When `true`, suppresses `Type.toString()` from the label header.
+  /// When `true`, suppresses `LogEntry.loggerName` from the label header.
   /// `dart compile js` minifies type names in release builds while
   /// leaving `dart.vm.product` as `false` — set this explicitly to
   /// `true` in production web bundles to avoid `[c8.fn]`-style noise.
@@ -119,24 +119,24 @@ class WebConsolePrinter implements LogPrinter {
 
   @override
   void log(LogEntry entry) {
-    final message = entry.object ?? entry.message;
+    final message = entry.object;
 
     if (message is LogMessage) {
       _logStructured(entry, message);
     } else {
-      _logAtLevel(entry.level, message.toString());
+      _logAtLevel(entry.level, entry.message);
     }
   }
 
   /// Logs a structured [LogMessage] entry using a collapsible group.
   void _logStructured(LogEntry entry, LogMessage message) {
-    final label = _buildLabel(entry.level, message);
+    final label = _buildLabel(entry, message);
 
     // Colored collapsible header via %c.
     _styledGroupCollapsed('%c$label'.toJS, _headerCss(entry.level).toJS);
 
     // Message text.
-    web.console.log(message.message.toJS);
+    web.console.log(entry.message.toJS);
 
     // Structured data as a native expandable JS object.
     if (message.data != null) {
@@ -238,19 +238,18 @@ class WebConsolePrinter implements LogPrinter {
   /// is extracted from the captured stack trace via [CallerExtractor]
   /// so the "method extracted from stack trace" behavior is honored
   /// on web too.
-  String _buildLabel(LogLevel level, LogMessage message) {
-    final emoji = level.emoji;
+  String _buildLabel(LogEntry entry, LogMessage message) {
+    final emoji = entry.level.emoji;
     final buffer = StringBuffer();
     if (emoji.isNotEmpty) {
       buffer.write('$emoji ');
     }
 
-    final runtimeType = message.type.toString();
     final hasUsefulType =
-        !suppressTypeNames && !isGenericLoggerName(runtimeType);
+        !suppressTypeNames && !isGenericLoggerName(entry.loggerName);
 
     String? method = message.method;
-    String? className = hasUsefulType ? runtimeType : null;
+    String? className = hasUsefulType ? entry.loggerName : null;
 
     // If the user didn't provide a method and we have a stack trace
     // captured by HyperLogger, try to extract the caller info.
@@ -273,7 +272,7 @@ class WebConsolePrinter implements LogPrinter {
       buffer.write('[$method] ');
     }
 
-    buffer.write(message.message);
+    buffer.write(entry.message);
     return buffer.toString();
   }
 

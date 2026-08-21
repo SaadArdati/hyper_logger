@@ -17,6 +17,13 @@ One method. Every printer receives a `LogEntry` with `level`, `message`,
 `loggerName`, `time`, `error`, `stackTrace`, and `object`. No dependency
 on `package:logging`. `LogEntry` is hyper_logger's own type.
 
+For native calls, `object` is normally a `LogMessage`. An alerting printer can
+check `LogMessage.reportToCrashReporting` to honor the call's
+`skipCrashReporting` policy. This field is metadata: changing it inside an
+interceptor does not alter HyperLogger's internal crash-delegate dispatch.
+Directly constructed `LogMessage` values default to `false`; ordinary
+third-party records generally do not carry this metadata.
+
 ## Built-in printers
 
 | Printer | Purpose |
@@ -74,8 +81,8 @@ LogPrinterPresets.terminal(
 | Parameter | Type | Default | Effect |
 |---|---|---|---|
 | `decorators` | `List<LogDecorator>` | required | Style configuration. Order doesn't matter. |
-| `methodCount` | `int` | `10` | Number of stack trace frames to include |
-| `errorMethodCount` | `int?` | `null` | Frame count for error-level logs. Falls back to `methodCount`. |
+| `methodCount` | `int` | `10` | Number of stack-trace frames to include; `0` avoids inspecting the trace when this effective limit applies. |
+| `errorMethodCount` | `int?` | `null` | Frame count for error-level logs. Falls back to `methodCount`; set both effective limits to `0` to disable all inspection. |
 | `excludePaths` | `List<String>` | `[]` | Library paths to exclude from stack traces |
 | `showAsyncGaps` | `bool` | `false` | Show async gap separators between traces |
 | `output` | `LogOutput` | `print` | Output sink callback |

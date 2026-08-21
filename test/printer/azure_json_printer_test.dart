@@ -4,7 +4,7 @@ import 'package:hyper_logger/hyper_logger.dart';
 import 'package:test/test.dart';
 
 LogEntry _record({
-  String message = 'test message',
+  String? message,
   Object? object,
   LogLevel level = LogLevel.info,
   Object? error,
@@ -13,7 +13,8 @@ LogEntry _record({
 }) {
   return LogEntry(
     level: level,
-    message: message,
+    message:
+        message ?? (object is LogMessage ? object.message : 'test message'),
     object: object,
     loggerName: loggerName,
     time: DateTime.utc(2026, 5, 9, 12, 0, 0),

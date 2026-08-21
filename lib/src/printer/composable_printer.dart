@@ -51,8 +51,9 @@ class ComposablePrinter implements LogPrinter {
 
   /// Tuning for the extraction stage:
   ///
-  /// - [methodCount] — stack frames rendered for a normal log. `0`
-  ///   skips stack rendering entirely.
+  /// - [methodCount] — stack frames rendered for a normal log. `0` skips
+  ///   stack inspection and rendering when this limit applies. To disable it
+  ///   for every entry, leave [errorMethodCount] null or set it to `0` too.
   /// - [errorMethodCount] — frames rendered when the entry carries an
   ///   error; falls back to [methodCount] when null, so normal logs can
   ///   stay terse while failures get a deep trace.
@@ -62,8 +63,8 @@ class ComposablePrinter implements LogPrinter {
   ///   write `'package:noisy'`, not `'package:noisy/'`.
   /// - [showAsyncGaps] — separate the traces of a chain with an
   ///   `asynchronous gap` row instead of splicing them together.
-  /// - [suppressTypeNames] — skip rendering `Type.toString()` into the
-  ///   class-name section, for builds where type names are minified.
+  /// - [suppressTypeNames] — skip rendering `LogEntry.loggerName` into the
+  ///   class-name section, for builds where its originating type was minified.
   ///   Defaults to [ContentExtractor.defaultSuppressTypeNames].
   ComposablePrinter(
     this.decorators, {

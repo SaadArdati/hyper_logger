@@ -1,17 +1,25 @@
 /// A single log entry produced by [HyperLogger].
 ///
-/// Carries the raw [message] string, optional structured [data], the [type]
-/// of the caller (for prefixing), an optional [method] name, an optional
+/// Carries a mirror of the canonical `LogEntry.message`, optional structured
+/// [data], source [type] metadata, an optional [method] name, an optional
 /// [callerStackTrace] captured at the call site, and optional [context]
 /// key-value pairs that flow from a [ScopedLogger]'s `child(context: ...)`.
+/// [reportToCrashReporting] exposes the originating native call's immutable
+/// routing hint for custom output policy.
 class LogMessage {
-  /// The primary human-readable log text.
+  /// A compatibility mirror of the containing `LogEntry.message`.
+  ///
+  /// Built-in printers use `LogEntry.message` as the canonical value. The
+  /// pipeline synchronizes this mirror after each interceptor and sanitizer.
   final String message;
 
   /// Optional structured payload attached to this log entry.
   final Object? data;
 
-  /// The [Type] of the object that emitted this log entry.
+  /// Source [Type] metadata for compatibility and custom tooling.
+  ///
+  /// Built-in printers use `LogEntry.loggerName` as the canonical display
+  /// name so it remains transformable by interceptors and sanitizers.
   final Type type;
 
   /// Optional method name where the log was emitted.
@@ -34,11 +42,8 @@ class LogMessage {
   /// Timestamp captured at the call site (via `clock.now()` in the
   /// caller's zone). Set by [HyperLogger]'s static methods.
   ///
-  /// Captured at emit time rather than at listener time because
-  /// `package:logging` listeners run in the zone where they were
-  /// registered — typically `init()`, which is outside any test's
-  /// `withClock(...)` zone. Capturing here preserves the caller's zone
-  /// so `withClock(...)`-driven tests see the fake time end-to-end.
+  /// Capturing at emit time preserves the caller's zone so
+  /// `withClock(...)`-driven tests see the fake time end-to-end.
   ///
   /// Direct construction caveat: if you build a [LogMessage]
   /// yourself (custom printers, tests) and want `withClock(...)` to
@@ -54,6 +59,14 @@ class LogMessage {
   /// of [message].
   final String? scopeTag;
 
+  /// Whether the originating native call requested crash-reporting dispatch.
+  ///
+  /// Custom printers can use this immutable metadata to align alert routing
+  /// with `skipCrashReporting`. The value mirrors the routing decision made by
+  /// `HyperLogger`; changing it in an interceptor or constructing a message
+  /// directly does not itself invoke or suppress the crash-reporting delegate.
+  final bool reportToCrashReporting;
+
   const LogMessage(
     this.message,
     this.type, {
@@ -63,7 +76,37 @@ class LogMessage {
     this.context,
     this.time,
     this.scopeTag,
+    this.reportToCrashReporting = false,
   });
+
+  /// Returns a transformed message while preserving every omitted field.
+  ///
+  /// Nullable fields use callbacks so `() => null` can explicitly clear a
+  /// value while an omitted callback retains the existing value.
+  LogMessage copyWith({
+    String? message,
+    Type? type,
+    Object? Function()? data,
+    String? Function()? method,
+    StackTrace? Function()? callerStackTrace,
+    Map<String, Object?>? Function()? context,
+    DateTime? Function()? time,
+    String? Function()? scopeTag,
+    bool? reportToCrashReporting,
+  }) => LogMessage(
+    message ?? this.message,
+    type ?? this.type,
+    data: data == null ? this.data : data(),
+    method: method == null ? this.method : method(),
+    callerStackTrace: callerStackTrace == null
+        ? this.callerStackTrace
+        : callerStackTrace(),
+    context: context == null ? this.context : context(),
+    time: time == null ? this.time : time(),
+    scopeTag: scopeTag == null ? this.scopeTag : scopeTag(),
+    reportToCrashReporting:
+        reportToCrashReporting ?? this.reportToCrashReporting,
+  );
 
   @override
   String toString() => message;

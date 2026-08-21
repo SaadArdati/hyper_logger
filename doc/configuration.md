@@ -15,6 +15,9 @@ HyperLogger.init(
   interceptors: [
     (entry) => entry.loggerName.contains('NoisyLib') ? null : entry,
   ],
+  sanitizers: [
+    RedactingInterceptor(secrets: [apiToken]).call,
+  ],
 );
 ```
 
@@ -22,14 +25,31 @@ HyperLogger.init(
 |---|---|---|---|
 | `printer` | `LogPrinter?` | auto-detected | The printer to use. See [Custom printers](custom_printers.md). |
 | `mode` | `LogMode` | `enabled` | Global logging mode. See [Log modes](#log-modes). |
-| `interceptors` | `List<LogInterceptor>?` | `null` | Filter, redact, enrich, or sample entries before they reach the printer. See [Interceptors](#interceptors). |
-| `captureStackTrace` | `bool` | `true` | Auto-extract caller class and method from the stack trace. Disable for ~700ns savings per call. See [Explicit method names](#explicit-method-names). |
+| `interceptors` | `List<LogInterceptor>?` | `null` | Filter, enrich, or sample entries before final sanitization. See [Interceptors and sanitizers](#interceptors-and-sanitizers). |
+| `sanitizers` | `List<LogSanitizer>?` | `null` | Ordered, fail-closed transformations applied before every output sink. See [Interceptors and sanitizers](#interceptors-and-sanitizers) and [Redaction and sanitizers](redaction.md). |
+| `captureStackTrace` | `bool` | `true` | Auto-extract caller class and method from the stack trace. Disable to avoid the platform-dependent capture cost. See [Explicit method names](#explicit-method-names). |
 | `configureLoggingPackage` | `bool` | `true` | Sets `hierarchicalLoggingEnabled` and root level on `package:logging`. Set `false` if another package (Firebase, for example) already manages logging config. |
 | `maxCacheSize` | `int` | `256` | LRU cache size for per-type loggers and scoped logger instances. Increase this if you log from hundreds of different types. |
 
 You can call `init()` more than once. The printer carries over between
 calls if you don't pass a new one. The `configureLoggingPackage` setup
 only runs on the first call to avoid overriding other packages.
+
+### Graceful shutdown
+
+`reset()` is intended for test isolation: the next log call automatically
+initializes a new default session. At application exit, use `shutdown()`:
+
+```dart
+await statefulPrinter.close();
+await HyperLogger.shutdown();
+```
+
+`shutdown()` disposes the active printer, detaches delegates, clears interceptor
+and sanitizer chains, handlers, subscriptions, and caches, and keeps all later
+log calls disabled. A subsequent explicit `HyperLogger.init()` starts a fresh session.
+Printer-specific asynchronous draining remains the printer owner's
+responsibility and must happen first.
 
 ## Printer presets
 
@@ -72,14 +92,14 @@ lines go. See [Custom printers: Output sinks](custom_printers.md#custom-output-s
 
 ### How `automatic()` detects your environment
 
-Detection runs in this order: GCP managed runtimes (Cloud Run, App
-Engine, Cloud Functions) → AWS managed runtimes (Lambda, ECS, Fargate) →
-CI → human(capabilities). The first match wins. The fall-through `human`
-case is itself capability-driven: it composes a preset from the live
-stdout's ANSI / TTY / column-width support, so a real terminal, an IDE
-Run Console, and a piped-to-file process each get the appropriate
-decorator stack. Detection happens once at init time, not on every log
-call.
+Detection runs in this order: GCP managed runtimes (Cloud Run, App Engine,
+Cloud Functions) → AWS managed runtimes (Lambda, ECS, Fargate) → Azure managed
+runtimes (App Service, Functions, Container Apps) → CI → human(capabilities).
+The first match wins. The fall-through `human` case is itself
+capability-driven: it composes a preset from the live stdout's ANSI / TTY /
+column-width support, so a real terminal, an IDE Run Console, and a
+piped-to-file process each get the appropriate decorator stack. Detection
+happens once at init time, not on every log call.
 
 IDE-launched processes (IntelliJ Run Configuration, VS Code Run/Debug,
 Android Studio) are detected on macOS via `__CFBundleIdentifier`, which
@@ -196,17 +216,28 @@ If you're wondering which to use: `silent` is for production, where you
 want quiet logs but still want to hear about problems. `minLevel` is for
 filtering out noise you genuinely never need to see.
 
-## Interceptors
+## Interceptors and sanitizers
 
 Sometimes you need more control than level filtering gives you. Maybe a
 third-party package logs aggressively at `info` level and you want to
 suppress just its output without affecting your own `info` calls. Or you
-want to redact secrets, enrich entries with build metadata, or sample
-high-volume events.
+want to enrich entries with build metadata or sample high-volume events.
 
-Interceptors run in order before the printer sees the entry. Each receives
-a `LogEntry` and returns either the entry (possibly modified) or `null`
-to drop it. The first `null` short-circuits the chain.
+Interceptors run in order before final sanitization. Each receives a `LogEntry`
+and returns either the entry (possibly modified) or `null` to drop it. The first
+`null` short-circuits the chain. If an interceptor throws, its previous input
+continues so an optional filtering or enrichment hook cannot black-hole logs.
+
+Sanitizers then run in declaration order. They have the same function shape,
+but are deliberately fail-closed: returning `null` or throwing drops the entry
+from both the printer and crash-reporting delegate. A later sanitizer sees the
+output of the earlier one. Put the broadest privacy policy last so it also
+checks fields introduced by preceding stages.
+
+This ordering implements a final privacy boundary; it does not make an ordinary
+interceptor safe for redaction. The [OWASP Logging Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html)
+recommends removing, masking, or sanitizing access tokens, passwords, session
+identifiers, encryption keys, and other sensitive data before recording it.
 
 ```dart
 HyperLogger.init(
@@ -218,22 +249,82 @@ HyperLogger.init(
       if (name.contains('supabase') && name.contains('auth')) return null;
       return entry;
     },
-
-    // 2. Redact `password=...` and `token=...` from messages.
-    (entry) => LogEntry(
-      level: entry.level,
-      message: entry.message
-          .replaceAll(RegExp(r'password=\S+'), 'password=***')
-          .replaceAll(RegExp(r'token=\S+'), 'token=***'),
-      object: entry.object,
-      loggerName: entry.loggerName,
-      time: entry.time,
-      error: entry.error,
-      stackTrace: entry.stackTrace,
-    ),
+  ],
+  sanitizers: [
+    // 2. Apply final privacy policies in order.
+    RedactingInterceptor(secrets: [apiToken]).call,
   ],
 );
 ```
+
+For a server process, pass an environment snapshot explicitly:
+
+```dart
+final redactor = RedactingInterceptor.fromEnvironment(
+  Platform.environment,
+  environmentKeys: ['DATABASE_URL', 'SERVICE_ACCOUNT_JSON'],
+  additionalSecrets: [runtimeCredential],
+);
+HyperLogger.init(sanitizers: [redactor.call]);
+```
+
+The package never reads process state itself, so this API remains portable.
+Environment names are explicit, exact, and case-sensitive; there is no fuzzy
+discovery of variables that merely look secret. The complete selected value is
+protected. When it is JSON, exact sensitive fields within it are also collected
+as literal secrets. Construction fails instead of silently degrading when a
+selected value or its valid JSON exceeds the policy's string, collection, depth,
+or node limits.
+
+The default policy matches structured keys case-sensitively, HTTP field names
+ASCII case-insensitively as required by [RFC 9110 §5.1](https://www.rfc-editor.org/rfc/rfc9110.html#section-5.1),
+and decoded URI/form parameter names case-sensitively. Extend it with
+application-schema names and unambiguous segment paths:
+
+```dart
+final policy = RedactionPolicy(
+  sensitiveKeys: {
+    ...RedactionPolicy.defaultSensitiveKeys,
+    'merchantSigningSecret',
+  },
+  sensitivePaths: [
+    RedactionPath(['users', RedactionPath.wildcard, 'ssn']),
+  ],
+);
+```
+
+Each structured surface is a path root. For example, the path above matches
+`data: {'users': [{'ssn': ...}]}` directly; do not prefix it with `data`.
+
+Only complete supported representations are decoded: JSON values, form bodies,
+URI references, HTTP field lines, and [RFC 7468](https://www.rfc-editor.org/rfc/rfc7468.html)
+textual blocks. OAuth's exact `access_token` header/form/query locations follow
+[RFC 6750 §2](https://www.rfc-editor.org/rfc/rfc6750.html#section-2), while URI
+user information and default cloud-signature query names follow
+[RFC 3986](https://www.rfc-editor.org/rfc/rfc3986.html#section-3.2.1) and the
+[OpenTelemetry URL profile](https://opentelemetry.io/docs/specs/semconv/registry/attributes/url/).
+Arbitrary prose is not guessed at with credential-shaped regexes. Configure
+literal `secrets` for opaque values that can occur in free text.
+
+Selected environment JSON rejects duplicate decoded object names before
+component-secret collection because [RFC 8259 §4](https://www.rfc-editor.org/rfc/rfc8259.html#section-4)
+documents inconsistent receiver behavior. General JSON redaction follows
+`dart:convert` duplicate-name behavior and does not promise rejection. Any
+transformation that changes a candidate is rechecked against supported
+representations, preventing a custom replacement from synthesizing an
+unchecked sensitive field or document.
+
+Traversal is bounded and cycle-aware. Unsupported application objects are
+replaced without invoking `toString()` by default. Use an explicit
+`objectEncoder` to map trusted domain objects into maps/lists/primitives, or
+select `UnknownValueHandling.dropEntry` when any unknown value must drop the
+complete entry. Literal matching is linear in the inspected text;
+`maxSecretCount` and `maxTotalSecretLength` bound automaton construction, while
+`maxStringLength` also bounds replacement and decoded output expansion.
+
+For the complete default-name tables, environment behavior, unknown-object
+choices, limitations, testing guidance, and standards rationale, see
+[Redaction and sanitizers](redaction.md).
 
 `LogEntry` fields available for filtering:
 
@@ -247,9 +338,10 @@ HyperLogger.init(
 | `stackTrace` | `StackTrace?` | Attached stack trace, if any |
 | `object` | `Object?` | The structured payload (a `LogMessage` internally) |
 
-Filters run after level filtering but before the printer. Delegate calls
-(crash reporting) happen before filters, so filtering a log entry does
-not prevent it from reaching your crash reporting service.
+The resulting order is: level filter → interceptors → sanitizers → crash
+reporting and printer. An interceptor can intentionally drop an entry before
+either sink. Every entry that reaches a sink has completed the entire sanitizer
+chain.
 
 ## Structured data
 
@@ -268,9 +360,11 @@ The data is rendered as indented JSON inside the log box:
 
 ![Structured data output](https://raw.githubusercontent.com/SaadArdati/hyper_logger/main/assets/preview_doc_data.png)
 
-Any value that isn't JSON-encodable falls back to `.toString()`. If
-encoding fails entirely, the whole payload is printed as a raw string.
-You don't need to worry about it crashing.
+Without a sanitizer, a value that isn't JSON-encodable falls back to
+`.toString()` during rendering. If encoding fails entirely, the whole payload
+is printed as a raw string. With `RedactingInterceptor`, unsupported values are
+handled earlier by `unknownValueHandling`; the safe default replaces them
+without invoking `toString()`.
 
 ## Explicit method names
 
@@ -278,9 +372,9 @@ By default, hyper_logger captures `StackTrace.current` on every log call
 to extract the calling class and method name. This is how
 `[AuthService.login]` appears in the prefix without you doing anything.
 
-Stack trace capture costs roughly 700 nanoseconds per call. In most apps
-this is negligible, but if you're logging in a tight loop or performance-
-critical path, you have two options:
+Stack-trace capture measured 633 nanoseconds per call in the dated JIT run in
+the [architecture guide](architecture.md#performance). It varies by runtime and
+hardware. In a tight loop or performance-critical path, you have two options:
 
 Pass `method:` explicitly on a per-call basis to skip the capture:
 

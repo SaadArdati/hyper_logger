@@ -165,7 +165,7 @@ noise in logcat), but the crash reporting delegate still fires (errors
 reach your crash reporting service).
 
 Disabling `captureStackTrace` in release is recommended for two reasons.
-First, it saves the ~700ns overhead per log call. Second, in release
+First, it avoids the platform-dependent stack-capture cost. Second, in release
 builds, Dart obfuscates and minifies stack traces, so the frames
 hyper_logger captures are unreadable anyway. `T.toString()` also returns
 minified class names in `dart2js` builds, so type prefixes like

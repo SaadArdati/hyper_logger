@@ -125,7 +125,7 @@ abstract class CloudJsonPrinterBase implements LogPrinter {
 
     final error = entry.error;
     final stackTrace = entry.stackTrace;
-    final baseMessage = object is LogMessage ? object.message : entry.message;
+    final baseMessage = entry.message;
 
     // Cloud error tooling (Cloud Error Reporting, CloudWatch Insights,
     // App Insights' search) reads the stack trace out of the `message`

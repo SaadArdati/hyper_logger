@@ -29,7 +29,7 @@ always optional: omit it when you don't need it, add it when you do.
 
 ## Every environment, one API
 
-`LogPrinterPresets.automatic()` detects GCP, AWS, CI, and human
+`LogPrinterPresets.automatic()` detects GCP, AWS, Azure, CI, and human
 and selects the best format:
 
 **Terminal** (emoji + box + ANSI colors)
@@ -183,12 +183,18 @@ class UserService with HyperLoggerMixin<UserService> {
 Cloud-shaped printers (`GcpJsonPrinter`, `AwsJsonPrinter`) merge the
 context into the JSON root so log aggregators can correlate by it.
 
-## Interceptors: filter, redact, enrich, sample
+## Interceptors and sanitizers
 
 `HyperLogger.init(interceptors: [...])` runs each entry through a chain
 of `LogEntry? Function(LogEntry)` — return the entry to pass it through,
 return `null` to drop it. A throwing interceptor is isolated and skipped
-so one bad hook can't black-hole the pipeline.
+so one bad hook can't black-hole the pipeline. Use this chain to filter,
+enrich, or sample entries.
+
+`sanitizers: [...]` is the final privacy boundary. It runs in declaration
+order after every interceptor and before both the printer and crash-reporting
+delegate. A sanitizer that returns `null` or throws drops the entry from every
+sink, so the earlier unsanitized value can never continue.
 
 ```dart
 HyperLogger.init(
@@ -196,19 +202,29 @@ HyperLogger.init(
   interceptors: [
     // 1. Drop noisy third-party logs entirely.
     (e) => e.loggerName.contains('GoTrue') ? null : e,
-    // 2. Redact secrets from messages before they reach the printer.
-    (e) => LogEntry(
-      level: e.level,
-      message: e.message.replaceAll(RegExp(r'token=\S+'), 'token=***'),
-      object: e.object,
-      loggerName: e.loggerName,
-      time: e.time,
-      error: e.error,
-      stackTrace: e.stackTrace,
-    ),
+  ],
+  sanitizers: [
+    // 2. Apply final privacy policies in order. Keep the broad redactor last.
+    RedactingInterceptor(secrets: [apiToken]).call,
   ],
 );
 ```
+
+`RedactingInterceptor` uses exact structured keys and paths, decoded JSON,
+case-insensitive HTTP field names, URI/form parameter names, matching
+certificate/key boundaries, and configured literal values. Changed output is
+re-inspected so a replacement cannot synthesize a sensitive supported format
+after its parser has run. Traversal, matcher construction, and output expansion
+are bounded; unsupported objects are replaced without invoking `toString()` by
+default.
+
+The defaults follow the [OWASP logging guidance](https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html),
+[HTTP semantics](https://www.rfc-editor.org/rfc/rfc9110.html),
+[OAuth bearer-token locations](https://www.rfc-editor.org/rfc/rfc6750.html#section-2),
+and [OpenTelemetry URL conventions](https://opentelemetry.io/docs/specs/semconv/url/).
+They are a baseline, not automatic PII or compliance discovery. See
+[Redaction and sanitizers](doc/redaction.md) for exact coverage, configuration,
+limits, limitations, tests, and the complete standards references.
 
 ## File output with rotation
 
@@ -296,14 +312,15 @@ to match the AppInsights `traces` table conventions.
 
 ```yaml
 dependencies:
-  hyper_logger: ^0.1.0
+  hyper_logger: ^0.3.0
 ```
 
 ## Documentation
 
 | Guide | |
 |---|---|
-| [Configuration](doc/configuration.md) | Log levels, log modes, printer presets, filtering, ANSI colors |
+| [Configuration](doc/configuration.md) | Initialization, modes, levels, presets, interceptors, and sanitizers |
+| [Redaction and sanitizers](doc/redaction.md) | Exact privacy policies, supported formats, limits, standards, and tests |
 | [Custom printers](doc/custom_printers.md) | Printer interface, decorators, `ThrottledPrinter`, custom sinks |
 | [Scoped loggers](doc/scoped_loggers.md) | Tags, level filters, mode toggling, caching |
 | [HyperLoggerMixin](doc/mixin.md) | Mixin usage, delegation chain, scoped injection |

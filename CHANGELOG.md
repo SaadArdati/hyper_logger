@@ -1,3 +1,60 @@
+## Unreleased
+
+## 0.3.0
+
+### Added
+
+- Add `HyperLogger.shutdown()` for graceful teardown that stays disabled until
+  the next explicit `init()`.
+- Add null-safe `copyWith` transformations to `LogEntry` and `LogMessage`.
+- Add an ordered, fail-closed `sanitizers` chain that protects printers and
+  crash-reporting delegates after ordinary interceptors.
+- Rebuild `RedactingInterceptor` around exact structured keys and paths, HTTP
+  field names, URI/form parameter names, JSON decoding, RFC 7468 boundaries,
+  bounded traversal, and configured literal secrets. Literal matching uses a
+  bounded linear-time multi-pattern automaton, with fail-closed limits on
+  matcher construction and sanitized output expansion.
+- Add explicit environment-secret collection, application-object encoders,
+  exact wildcard paths, and configurable unknown-value handling.
+- Add a standards-backed redaction guide covering exact behavior, limits,
+  performance, testing, and limitations; mirror every cited source in the
+  public Dart API documentation.
+
+### Changed
+
+- Skip record allocation, conversion, interceptors, and sanitizers when the
+  current mode and routing flags leave no eligible printer or crash delegate.
+- Route native calls directly into the sanitized pipeline; `package:logging`
+  remains an inbound bridge for third-party records and never broadcasts raw
+  HyperLogger payloads to unrelated root-stream subscribers. Code that relied
+  on observing HyperLogger-native calls through `Logger.root.onRecord` should
+  use a `LogPrinter`, interceptor, or sanitizer instead.
+- Make `LogEntry.message` and `LogEntry.loggerName` canonical across built-in
+  printers and synchronize the `LogMessage.message` compatibility mirror after
+  every interceptor and sanitizer stage.
+- Expose `LogMessage.reportToCrashReporting` as immutable routing metadata so
+  custom printers can honor `skipCrashReporting`; delegate dispatch still uses
+  the pipeline's internal routing decision.
+- Replace the redactor's `sensitiveKeyPattern` parameter with exact
+  `RedactionPolicy` sets. Migration: configure `sensitiveKeys`,
+  `sensitiveHeaderNames`, and `sensitiveQueryParameters`, and pass the new
+  required exact `environmentKeys` list to `fromEnvironment`.
+- Skip stack-trace inspection and chain construction when the effective
+  `methodCount` is zero; `errorMethodCount` remains the error-entry override.
+
+### Security
+
+- Ensure sanitizer exceptions and `null` results drop entries before every
+  configured sink instead of restoring an earlier unsanitized value.
+- Revalidate changed candidates to a bounded fixed point so replacement
+  composition cannot synthesize an unchecked JSON, HTTP, URI/form, literal, or
+  final structured-path representation.
+- Reject duplicate decoded names in selected environment JSON, cycles,
+  unsupported values when `UnknownValueHandling.dropEntry` is selected, and
+  all configured resource-limit violations.
+- Keep constructor and pipeline diagnostics generic so confidential input is
+  not reflected through errors.
+
 ## 0.2.2+2
 
 - Shrink the published archive from 1.1 MB to 168 KB. The README and docs now

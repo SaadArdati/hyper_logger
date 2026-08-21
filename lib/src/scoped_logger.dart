@@ -169,18 +169,7 @@ class ScopedLogger<T> implements ScopedLoggerApi<T> {
   @override
   void warning(String msg, {Object? data, String? method}) {
     if (_suppressed(LogLevel.warning)) return;
-    if (mode == LogMode.silent) {
-      // Honor the global mode in the silent path: scoped mode can only
-      // be more restrictive than global, never less. When global is
-      // `disabled` we must not fire the delegate either.
-      if (HyperLogger.mode == LogMode.disabled) return;
-      fireDelegateSafely(() => HyperLogger.crashReporting?.log(_tagged(msg)));
-      return;
-    }
     final tagged = _tagged(msg);
-    if (HyperLogger.mode != LogMode.disabled) {
-      fireDelegateSafely(() => HyperLogger.crashReporting?.log(tagged));
-    }
     HyperLogger._logScoped<T>(
       LogLevel.warning,
       tagged,
@@ -188,6 +177,8 @@ class ScopedLogger<T> implements ScopedLoggerApi<T> {
       method: method,
       context: _ctx,
       scopeTag: options.tag,
+      reportToCrashReporting: true,
+      suppressPrinter: mode == LogMode.silent,
     );
   }
 
@@ -203,29 +194,6 @@ class ScopedLogger<T> implements ScopedLoggerApi<T> {
     if (_suppressed(LogLevel.error)) return;
     final tagged = _tagged(message);
     final skip = skipCrashReporting ?? options.skipCrashReporting;
-    if (mode == LogMode.silent) {
-      // Honor the global mode (see warning() above for rationale).
-      if (HyperLogger.mode == LogMode.disabled) return;
-      if (!skip) {
-        fireDelegateSafely(
-          () => HyperLogger.crashReporting?.recordError(
-            exception ?? tagged,
-            stackTrace,
-            reason: tagged,
-          ),
-        );
-      }
-      return;
-    }
-    if (HyperLogger.mode != LogMode.disabled && !skip) {
-      fireDelegateSafely(
-        () => HyperLogger.crashReporting?.recordError(
-          exception ?? tagged,
-          stackTrace,
-          reason: tagged,
-        ),
-      );
-    }
     HyperLogger._logScoped<T>(
       LogLevel.error,
       tagged,
@@ -235,6 +203,8 @@ class ScopedLogger<T> implements ScopedLoggerApi<T> {
       stackTrace: stackTrace,
       context: _ctx,
       scopeTag: options.tag,
+      reportToCrashReporting: !skip,
+      suppressPrinter: mode == LogMode.silent,
     );
   }
 
@@ -248,29 +218,6 @@ class ScopedLogger<T> implements ScopedLoggerApi<T> {
   }) {
     if (_suppressed(LogLevel.fatal)) return;
     final tagged = _tagged(message);
-    if (mode == LogMode.silent) {
-      // Honor the global mode (see warning() above for rationale).
-      if (HyperLogger.mode == LogMode.disabled) return;
-      fireDelegateSafely(
-        () => HyperLogger.crashReporting?.recordError(
-          exception ?? tagged,
-          stackTrace,
-          fatal: true,
-          reason: tagged,
-        ),
-      );
-      return;
-    }
-    if (HyperLogger.mode != LogMode.disabled) {
-      fireDelegateSafely(
-        () => HyperLogger.crashReporting?.recordError(
-          exception ?? tagged,
-          stackTrace,
-          fatal: true,
-          reason: tagged,
-        ),
-      );
-    }
     HyperLogger._logScoped<T>(
       LogLevel.fatal,
       tagged,
@@ -280,6 +227,8 @@ class ScopedLogger<T> implements ScopedLoggerApi<T> {
       stackTrace: stackTrace,
       context: _ctx,
       scopeTag: options.tag,
+      reportToCrashReporting: true,
+      suppressPrinter: mode == LogMode.silent,
     );
   }
 
